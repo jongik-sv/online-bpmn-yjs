@@ -1,0 +1,35 @@
+{
+  "mcpServers": {
+    "sequential-thinking": {
+      "command": "cmd",
+      "args": [
+        "/c",
+        "npx",
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking"
+      ]
+    },
+    "Context7": {
+      "command": "cmd",
+      "type":"studio",
+      "args": [
+        "/c",
+        "npx",
+        "-y",
+        "@upstash/context7-mcp"
+      ],
+      "description": ""
+    },
+    "taskmaster-ai": {
+      "command": "cmd",
+      "type":"studio",      
+      "args": [
+        "/c",
+        "npx",
+        "-y",
+        "--package=task-master-ai",
+        "task-master-ai"
+      ]
+    }
+  }
+}

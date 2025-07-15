@@ -1,0 +1,28 @@
+{
+  "name": "bpmn-collaboration-client",
+  "version": "1.0.0",
+  "description": "BPMN 실시간 협업 클라이언트",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "webpack serve --mode development --port 8082",
+    "build": "webpack --mode production",
+    "start": "npm run dev",
+    "clean": "rm -rf dist node_modules"
+  },
+  "keywords": ["bpmn", "collaboration", "yjs", "real-time"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "bpmn-js": "^17.2.1",
+    "yjs": "^13.6.10",
+    "y-websocket": "^1.5.3"
+  },
+  "devDependencies": {
+    "webpack": "^5.89.0",
+    "webpack-cli": "^5.1.4",
+    "webpack-dev-server": "^4.15.1",
+    "html-webpack-plugin": "^5.5.3",
+    "css-loader": "^6.8.1",
+    "style-loader": "^3.3.3"
+  }
+}

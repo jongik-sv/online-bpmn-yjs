@@ -1,0 +1,58 @@
+{
+  "name": "online-bpmn-diff",
+  "version": "1.0.0",
+  "description": "Online BPMN collaboration system with real-time diff synchronization",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "echo 'Use npm run server and npm run client instead'",
+    "dev": "echo 'Use npm run server and npm run client instead'",
+    "server": "cd server && npm run dev",
+    "client": "cd client && npm run dev",
+    "legacy": "node server/simple-server.js",
+    "test": "npm run test --prefix tests",
+    "test:unit": "npm run test:unit --prefix tests",
+    "test:integration": "npm run test:integration --prefix tests",
+    "test:coverage": "npm run test:coverage --prefix tests",
+    "build": "npm run test && npm run lint",
+    "lint": "eslint src/ server/ tests/",
+    "format": "prettier --write src/ server/ tests/",
+    "docs": "jsdoc -c jsdoc.config.json",
+    "install:all": "npm install && npm install --prefix server && npm install --prefix tests"
+  },
+  "keywords": [
+    "bpmn",
+    "collaboration",
+    "diff",
+    "synchronization",
+    "real-time",
+    "websocket",
+    "yjs"
+  ],
+  "author": "BPMN Collaboration Team",
+  "license": "MIT",
+  "dependencies": {
+    "bpmn-js": "^17.0.0",
+    "yjs": "^13.6.27",
+    "y-websocket": "^3.0.0",
+    "express": "^4.18.2",
+    "ws": "^8.14.2"
+  },
+  "devDependencies": {
+    "eslint": "^8.53.0",
+    "prettier": "^3.1.0",
+    "jsdoc": "^4.0.2",
+    "c8": "^8.0.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-org/online-bpmn-diff.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-org/online-bpmn-diff/issues"
+  },
+  "homepage": "https://github.com/your-org/online-bpmn-diff#readme"
+}

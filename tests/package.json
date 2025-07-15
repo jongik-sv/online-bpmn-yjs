@@ -1,0 +1,28 @@
+{
+  "name": "bpmn-collaboration-tests",
+  "version": "1.0.0",
+  "description": "Test suite for BPMN collaboration system",
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "test:unit": "node --test tests/unit/**/*.test.js",
+    "test:integration": "node --test tests/integration/**/*.test.js",
+    "test:watch": "node --test --watch",
+    "test:coverage": "c8 node --test",
+    "test:verbose": "node --test --reporter=spec"
+  },
+  "dependencies": {
+    "ws": "^8.14.2",
+    "yjs": "^13.6.8"
+  },
+  "devDependencies": {
+    "c8": "^8.0.1"
+  },
+  "keywords": [
+    "test",
+    "bpmn", 
+    "collaboration",
+    "websocket",
+    "yjs"
+  ]
+}

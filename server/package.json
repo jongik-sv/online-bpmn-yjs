@@ -1,0 +1,39 @@
+{
+  "name": "bpmn-collaboration-server",
+  "version": "1.0.0",
+  "description": "Express.js server for real-time BPMN collaboration",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "test": "node --test",
+    "lint": "eslint .",
+    "format": "prettier --write ."
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "ws": "^8.18.3",
+    "yjs": "^13.6.27",
+    "y-websocket": "^1.5.4",
+    "cors": "^2.8.5"
+  },
+  "devDependencies": {
+    "eslint": "^8.53.0",
+    "prettier": "^3.1.0",
+    "nodemon": "^3.0.1"
+  },
+  "keywords": [
+    "bpmn",
+    "collaboration",
+    "real-time",
+    "websocket",
+    "yjs",
+    "express"
+  ],
+  "author": "BPMN Collaboration Team",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
