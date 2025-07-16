@@ -1,6 +1,9 @@
 /**
  * Online BPMN Diff - 데모 애플리케이션
  */
+import BpmnFactory from '../../bpmn-js/lib/features/modeling/BpmnFactory.js';
+import UnifiedEventManager from '../../src/utils/UnifiedEventManager.js';
+import CollaborativeIdModule from './CollaborativeIdModule.js';
 
 export class BpmnCollaborationDemo {
   constructor() {
@@ -25,6 +28,25 @@ export class BpmnCollaborationDemo {
     this.remoteChangeCount = 0; // 중첩된 원격 변경 추적
     this.lastSyncedData = new Map(); // 마지막 동기화 데이터 캐시
     this.moveTimeouts = new Map(); // 이동 이벤트 디바운스용
+    this.connectionRetryCount = new Map(); // 연결 생성 재시도 카운트
+    this.synchronizationEnabled = true; // 동기화 활성화 상태
+    this.errorCount = 0; // 에러 카운터
+    this.maxErrors = 5; // 최대 에러 허용 횟수
+    this.autoStopOnError = true; // 에러 시 자동 중지 활성화
+    this.pendingElements = new Map(); // 임시 ID → 확정 ID 매핑
+    this.tempIdCounter = 0; // 임시 ID 카운터
+    
+    // 이벤트 중복 방지 시스템
+    this.eventManager = new UnifiedEventManager({
+      windowMs: 1000,           // 1초 중복 방지 윈도우
+      queueSize: 20,            // 20개 이벤트 큐
+      batchDelay: 50,           // 50ms 배치 지연
+      enableBatching: true,     // 배치 처리 활성화
+      enableConsolidation: true // 이벤트 통합 활성화
+    });
+    
+    // 이벤트 핸들러 등록
+    this.setupEventHandlers();
     
     // Y.js 데이터 구조
     this.yElements = this.yjsDoc.getMap('elements');
@@ -52,12 +74,25 @@ export class BpmnCollaborationDemo {
         keyboard: {
           bindTo: document
         },
-        additionalModules: [],
+        additionalModules: [
+          // CollaborativeIdModule  // 임시로 비활성화
+        ],
         moddleExtensions: {}
       });
 
       // 초기 다이어그램 로드
       this.loadInitialDiagram();
+      
+      // CustomElementFactory에 협업 데모 인스턴스 설정
+      try {
+        const customElementFactory = this.modeler.get('elementFactory');
+        if (customElementFactory && customElementFactory.setCollaborationDemo) {
+          customElementFactory.setCollaborationDemo(this);
+          console.log('CustomElementFactory에 협업 데모 인스턴스 설정 완료');
+        }
+      } catch (error) {
+        console.log('CustomElementFactory 설정 실패:', error);
+      }
       
       // 모델러 이벤트 리스너
       this.modeler.on('element.changed', (event) => {
@@ -70,11 +105,37 @@ export class BpmnCollaborationDemo {
 
       // 실시간 협업을 위한 추가 이벤트
       this.modeler.on('commandStack.element.create.postExecuted', (event) => {
+        // 먼저 협업 ID로 교체 시도
+        this.handleElementCreateWithCollaborativeId(event);
+        // 그 다음 일반 다이어그램 변경 처리
+        this.handleDiagramChange('create', event);
+      });
+
+      // 연결 생성 이벤트 핸들러 추가
+      this.modeler.on('commandStack.connection.create.postExecuted', (event) => {
         this.handleDiagramChange('create', event);
       });
 
       this.modeler.on('commandStack.element.delete.postExecuted', (event) => {
+        console.log('삭제 이벤트 감지:', event.context?.element?.id);
         this.handleDiagramChange('delete', event);
+      });
+
+      // 다른 삭제 이벤트들도 확인
+      this.modeler.on('commandStack.elements.delete.postExecuted', (event) => {
+        console.log('복수 요소 삭제 이벤트 감지:', event.context?.elements?.map(e => e.id));
+        // 복수 요소 삭제 시 각각 처리
+        if (event.context?.elements) {
+          event.context.elements.forEach(element => {
+            console.log(`복수 삭제 처리: ${element.id}`);
+            this.removeElementFromYjs(element);
+          });
+        }
+      });
+
+      // 모든 commandStack 이벤트 로깅 (디버깅용)
+      this.modeler.on('commandStack.changed', (event) => {
+        console.log('CommandStack 이벤트:', event);
       });
 
       // 이동 관련 이벤트들 - commandStack 이벤트 사용 (더 안정적)
@@ -287,6 +348,25 @@ export class BpmnCollaborationDemo {
    * Y.js 요소 변경 처리
    */
   handleYjsElementsChange(event) {
+    // 동기화가 비활성화되어 있으면 스킵
+    if (!this.synchronizationEnabled) return;
+    
+    // 로컬 변경으로 인한 Y.js 업데이트는 무시 (자신의 변경사항은 이미 로컬에 적용됨)
+    const origin = event.transaction.origin;
+    if (origin === this.clientId) {
+      console.log('로컬 변경으로 인한 Y.js 요소 이벤트 무시', { 
+        origin: typeof origin === 'string' ? origin : origin?.constructor?.name,
+        clientId: this.clientId 
+      });
+      return;
+    }
+    
+    // WebSocketProvider가 origin인 경우는 원격 변경사항이므로 처리
+    console.log('Y.js 요소 변경 처리', {
+      origin: typeof origin === 'string' ? origin : origin?.constructor?.name,
+      isProvider: origin === this.yProvider
+    });
+    
     event.changes.keys.forEach((change, key) => {
       if (change.action === 'add' || change.action === 'update') {
         const elementData = this.yElements.get(key);
@@ -301,11 +381,80 @@ export class BpmnCollaborationDemo {
    * Y.js 연결 변경 처리
    */
   handleYjsConnectionsChange(event) {
+    // 동기화가 비활성화되어 있으면 스킵
+    if (!this.synchronizationEnabled) return;
+    
     if (this.isApplyingRemoteChange) return;
+    
+    // 로컬 변경으로 인한 Y.js 업데이트는 무시 (자신의 변경사항은 이미 로컬에 적용됨)
+    const origin = event.transaction.origin;
+    if (origin === this.clientId) {
+      console.log('로컬 변경으로 인한 Y.js 연결 이벤트 무시', { 
+        origin: typeof origin === 'string' ? origin : origin?.constructor?.name,
+        clientId: this.clientId 
+      });
+      return;
+    }
+    
+    // WebSocketProvider가 origin인 경우는 원격 변경사항이므로 처리
+    console.log('Y.js 연결 변경 처리', {
+      origin: typeof origin === 'string' ? origin : origin?.constructor?.name,
+      isProvider: origin === this.yProvider
+    });
 
     event.changes.keys.forEach((change, key) => {
       if (change.action === 'add' || change.action === 'update') {
         const connectionData = this.yConnections.get(key);
+        
+        // 실제 waypoint 데이터를 포함한 더 정확한 중복 방지
+        const eventData = {
+          elementId: key,
+          action: 'yjsConnectionChange',
+          waypoints: connectionData?.waypoints,
+          businessObject: connectionData?.businessObject,
+          timestamp: Date.now()
+        };
+
+        // 연결 데이터 유효성 검사
+        if (!connectionData || !connectionData.source || !connectionData.target) {
+          console.log('잘못된 Y.js 연결 데이터 무시됨:', key, connectionData);
+          return;
+        }
+
+        // 소스/타겟 요소 존재 여부 확인
+        const elementRegistry = this.modeler.get('elementRegistry');
+        const sourceElement = elementRegistry.get(connectionData.source);
+        const targetElement = elementRegistry.get(connectionData.target);
+        
+        if (!sourceElement || !targetElement) {
+          console.log(`⚠️ Y.js 연결 처리 스킵 - 요소 부재: ${key} (소스: ${!!sourceElement}, 타겟: ${!!targetElement})`);
+          
+          // 100ms 후 재시도 (요소가 아직 생성되지 않았을 수 있음)
+          setTimeout(() => {
+            console.log(`🔄 연결 재시도: ${key}`);
+            this.applyConnectionChange(key, connectionData);
+          }, 100);
+          return;
+        }
+
+        const shouldProcess = this.eventManager.emit('yjs.connection.change', eventData);
+        if (!shouldProcess) {
+          console.log('중복 Y.js 연결 변경 무시됨:', key);
+          return;
+        }
+
+        // 연결된 요소가 이동 중인 경우 연결선 업데이트를 지연
+        const connection = elementRegistry.get(key);
+        
+        if (connection && this.isConnectedElementMoving(connection)) {
+          console.log('연결된 요소 이동 중으로 연결선 업데이트 지연:', key);
+          // 300ms 후에 재시도
+          setTimeout(() => {
+            this.applyConnectionChange(key, connectionData);
+          }, 300);
+          return;
+        }
+
         this.applyConnectionChange(key, connectionData);
       } else if (change.action === 'delete') {
         this.removeConnection(key);
@@ -447,6 +596,12 @@ export class BpmnCollaborationDemo {
         return;
       }
       
+      console.log(`🔵 요소 생성 시작: ${elementId} (타입: ${elementData.type})`);
+      
+      // 원격 변경 플래그 설정 (동기화 루프 방지)
+      const wasApplyingRemoteChange = this.isApplyingRemoteChange;
+      this.isApplyingRemoteChange = true;
+      
       const elementRegistry = this.modeler.get('elementRegistry');
       const modeling = this.modeler.get('modeling');
       
@@ -455,14 +610,23 @@ export class BpmnCollaborationDemo {
       if (!element && elementData.type) {
         // 새 요소 생성
         this.createElement(elementId, elementData);
+        console.log(`✅ 요소 생성 완료: ${elementId}`);
       } else if (element) {
         // 기존 요소 업데이트
         this.updateElement(element, elementData);
+        console.log(`🔄 요소 업데이트 완료: ${elementId}`);
       }
       
       this.addLog(`요소 변경 적용: ${elementId}`, 'success');
+      
+      // 원격 변경 플래그 복원
+      this.isApplyingRemoteChange = wasApplyingRemoteChange;
+      
     } catch (error) {
       console.error('요소 변경 적용 오류:', error);
+      this.handleSyncError(error, 'applyElementChange');
+      // 오류 발생 시에도 플래그 복원
+      this.isApplyingRemoteChange = false;
     }
   }
 
@@ -471,6 +635,8 @@ export class BpmnCollaborationDemo {
    */
   applyConnectionChange(connectionId, connectionData) {
     try {
+      console.log(`🔴 연결선 생성 시작: ${connectionId} (소스: ${connectionData.source}, 타겟: ${connectionData.target})`);
+      
       const elementRegistry = this.modeler.get('elementRegistry');
       const modeling = this.modeler.get('modeling');
       
@@ -479,14 +645,17 @@ export class BpmnCollaborationDemo {
       if (!connection && connectionData.type) {
         // 새 연결 생성
         this.createConnection(connectionId, connectionData);
+        console.log(`✅ 연결선 생성 시도 완료: ${connectionId}`);
       } else if (connection) {
-        // 기존 연결 업데이트
-        this.updateConnection(connection, connectionData);
+        // 기존 연결 업데이트 (원격 변경사항)
+        this.updateConnection(connection, connectionData, true);
+        console.log(`🔄 연결선 업데이트 완료: ${connectionId}`);
       }
       
       this.addLog(`연결 변경 적용: ${connectionId}`, 'success');
     } catch (error) {
       console.error('연결 변경 적용 오류:', error);
+      this.handleSyncError(error, 'applyConnectionChange');
     }
   }
 
@@ -498,20 +667,39 @@ export class BpmnCollaborationDemo {
       const modeling = this.modeler.get('modeling');
       const elementFactory = this.modeler.get('elementFactory');
       const elementRegistry = this.modeler.get('elementRegistry');
+      const bpmnFactory = this.modeler.get('bpmnFactory');
+      
+      // Y.js에서 받은 elementId가 이미 협업 ID
+      const finalId = elementId;
+      
+      // 이미 해당 ID로 요소가 존재하는지 확인
+      const existingElement = elementRegistry.get(finalId);
+      if (existingElement) {
+        console.log(`요소가 이미 존재함: ${finalId}, 생성 스킵`);
+        return;
+      }
       
       const parent = elementRegistry.get(elementData.parent || 'Process_1');
       const position = elementData.position || { x: 100, y: 100 };
+
+      // name이 빈 문자열인 경우 제외
+      const cleanBusinessObject = {};
+      if (elementData.businessObject) {
+        Object.keys(elementData.businessObject).forEach(key => {
+          if (key === 'name' && elementData.businessObject[key] === '') {
+            // name이 빈 문자열이면 제외
+            return;
+          }
+          cleanBusinessObject[key] = elementData.businessObject[key];
+        });
+      }
       
-      const elementProps = {
-        id: elementId,
-        type: elementData.type,
-        ...elementData.businessObject
-      };
-      
-      const newElement = elementFactory.createShape(elementProps);
-      modeling.createShape(newElement, position, parent);
-      
-      console.log('요소 생성됨:', elementId);
+      const businessObject = bpmnFactory.create(elementData.type, {...cleanBusinessObject, id: finalId})
+      const newElement = elementFactory.createElement('shape', {type: elementData.type, businessObject: businessObject});
+      const shape = modeling.createShape(newElement, position, parent);
+
+
+      console.log('원격 요소 생성됨:', finalId);
       
     } catch (error) {
       console.error('요소 생성 오류:', error);
@@ -557,46 +745,205 @@ export class BpmnCollaborationDemo {
   }
 
   /**
-   * BPMN 연결 생성
+   * BPMN 연결 생성 (기존 방식 - 주석 처리)
+   */
+  // createConnection(connectionId, connectionData) {
+  //   try {
+  //     const modeling = this.modeler.get('modeling');
+  //     const elementFactory = this.modeler.get('elementFactory');
+  //     const elementRegistry = this.modeler.get('elementRegistry');
+  //     const bpmnFactory = this.modeler.get('bpmnFactory');
+      
+  //     // Y.js에서 받은 connectionId가 이미 협업 ID
+  //     const finalId = connectionId;
+      
+  //     // 이미 해당 ID로 연결이 존재하는지 확인
+  //     const existingConnection = elementRegistry.get(finalId);
+  //     if (existingConnection) {
+  //       console.log(`연결이 이미 존재함: ${finalId}, 생성 스킵`);
+  //       return;
+  //     }
+      
+  //     const source = elementRegistry.get(connectionData.source);
+  //     const target = elementRegistry.get(connectionData.target);
+      
+  //     if (source && target) {
+  //       // BusinessObject 생성
+  //       const businessObject = bpmnFactory.create(connectionData.type || 'bpmn:SequenceFlow', {
+  //         ...connectionData.businessObject,
+  //         id: finalId,
+  //         sourceRef: source.businessObject,
+  //         targetRef: target.businessObject
+  //       });
+        
+  //       // Connection Element 생성
+  //       const newConnection = elementFactory.createElement('connection', {
+  //         type: connectionData.type || 'bpmn:SequenceFlow',
+  //         id: finalId,
+  //         businessObject: businessObject,
+  //         source: source,
+  //         target: target
+  //       });
+        
+  //       // Connection 생성
+  //       const connection = modeling.createConnection(source, target, newConnection, source.parent);
+        
+  //       console.log('✅ 원격 연결 생성 성공:', finalId);
+        
+  //       // 성공 시 재시도 카운트 정리
+  //       this.connectionRetryCount.delete(connectionId);
+  //       return connection;
+  //     } else {
+  //       // 재시도 횟수 확인
+  //       const retryCount = this.connectionRetryCount.get(connectionId) || 0;
+  //       const maxRetries = 10; // 최대 10번 재시도 (총 1초)
+        
+  //       if (retryCount < maxRetries) {
+  //         console.log(`연결 생성 재시도 ${retryCount + 1}/${maxRetries}: ${connectionId}`, {
+  //           sourceId: connectionData.source,
+  //           targetId: connectionData.target,
+  //           sourceFound: !!source,
+  //           targetFound: !!target
+  //         });
+          
+  //         this.connectionRetryCount.set(connectionId, retryCount + 1);
+          
+  //         // 요소가 아직 생성되지 않았을 수 있으므로 잠시 후 재시도
+  //         setTimeout(() => {
+  //           this.createConnection(connectionId, connectionData);
+  //         }, 100);
+  //       } else {
+  //         console.error('연결 생성 최대 재시도 초과:', connectionId, {
+  //           sourceId: connectionData.source,
+  //           targetId: connectionData.target,
+  //           sourceFound: !!source,
+  //           targetFound: !!target
+  //         });
+          
+  //         // 재시도 카운트 정리
+  //         this.connectionRetryCount.delete(connectionId);
+          
+  //         // Y.js에서 잘못된 연결 데이터 제거 (무한 재시도 방지)
+  //         console.log('Y.js에서 잘못된 연결 데이터 제거:', connectionId);
+  //         this.yConnections.delete(connectionId);
+          
+  //         this.addLog(`연결 생성 실패로 Y.js 데이터 정리: ${connectionId}`, 'error');
+  //       }
+  //     }
+  //   } catch (error) {
+  //     console.error('연결 생성 오류:', error);
+  //     this.handleSyncError(error, 'createConnection');
+  //   }
+  // }
+
+  /**
+   * BPMN 연결 생성 (새로운 방식 - elementFactory 직접 사용)
    */
   createConnection(connectionId, connectionData) {
     try {
-      const modeling = this.modeler.get('modeling');
+      const elementFactory = this.modeler.get('elementFactory');
       const elementRegistry = this.modeler.get('elementRegistry');
+      const modeling = this.modeler.get('modeling');
+      
+      // Y.js에서 받은 connectionId가 이미 협업 ID
+      const finalId = connectionId;
+      
+      // 이미 해당 ID로 연결이 존재하는지 확인
+      const existingConnection = elementRegistry.get(finalId);
+      if (existingConnection) {
+        console.log(`연결이 이미 존재함: ${finalId}, 생성 스킵`);
+        return;
+      }
       
       const source = elementRegistry.get(connectionData.source);
       const target = elementRegistry.get(connectionData.target);
+      const process = elementRegistry.get('Process_1');
       
       if (source && target) {
-        // connect 메서드 사용 (더 안전)
-        const connection = modeling.connect(source, target, {
-          id: connectionId,
-          type: connectionData.type || 'bpmn:SequenceFlow'
-        });
+        // name이 빈 문자열인 경우 제외
+        const cleanBusinessObject = {};
+        if (connectionData.businessObject) {
+          Object.keys(connectionData.businessObject).forEach(key => {
+            if (key === 'name' && connectionData.businessObject[key] === '') {
+              // name이 빈 문자열이면 제외
+              return;
+            }
+            cleanBusinessObject[key] = connectionData.businessObject[key];
+          });
+        }
         
-        console.log('연결 생성됨:', connectionId);
+        let attr = {
+          id: finalId,
+          type: connectionData.type || 'bpmn:SequenceFlow',
+        }
+
+        // if(connectionData.waypoints) 
+        //   attr.waypoints = connectionData.waypoints;
+
+        // if(connectionData.name)
+        //   attr.name = connectionData.name;
+
+        const connection = modeling.createConnection(source, target, {
+            type: connectionData.type || 'bpmn:SequenceFlow',
+            // waypoints
+          }, 
+          process // source.parent?.id || 'Process_1'
+        );
+
+        console.log('연결 성공 : ', connection);
       } else {
-        console.error('연결 생성 실패: 소스 또는 타겟 요소를 찾을 수 없음', {
-          sourceId: connectionData.source,
-          targetId: connectionData.target,
-          sourceFound: !!source,
-          targetFound: !!target
-        });
-        
-        // 요소가 아직 생성되지 않았을 수 있으므로 잠시 후 재시도
-        setTimeout(() => {
-          this.createConnection(connectionId, connectionData);
-        }, 100);
+        console.error('연결 대상을 찾지 못했습니다.:', source, target);
       }
     } catch (error) {
       console.error('연결 생성 오류:', error);
+      this.handleSyncError(error, 'createConnection');
     }
   }
 
   /**
    * BPMN 연결 업데이트
    */
-  updateConnection(connection, connectionData) {
+  updateConnection(connection, connectionData, isRemote = false) {
+    // 원격 변경사항이 아닐 때만 중복 방지 적용
+    if (!isRemote) {
+      const eventData = {
+        elementId: connection.id,
+        action: 'updateConnection',
+        waypoints: connectionData.waypoints,
+        properties: connectionData.businessObject
+      };
+
+      const shouldProcess = this.eventManager.emit('connection.update', eventData);
+      if (!shouldProcess) {
+        console.log('중복 연결 업데이트 무시됨:', connection.id);
+        return;
+      }
+    }
+
+    // 실제 업데이트 처리
+    this.processConnectionUpdate(connection, connectionData, isRemote);
+  }
+
+  /**
+   * 연결된 요소가 이동 중인지 확인
+   */
+  isConnectedElementMoving(connection) {
+    if (!connection.source || !connection.target) return false;
+    
+    // 소스나 타겟 요소가 최근에 이동했는지 확인 (500ms 이내)
+    const now = Date.now();
+    const sourceId = connection.source.id;
+    const targetId = connection.target.id;
+    
+    return this.moveTimeouts.has(sourceId) || this.moveTimeouts.has(targetId) ||
+           (this.lastChangedElement && (this.lastChangedElement === sourceId || this.lastChangedElement === targetId) &&
+            this.lastChangeTime && (now - this.lastChangeTime) < 500);
+  }
+
+  /**
+   * 실제 연결 업데이트 처리
+   */
+  processConnectionUpdate(connection, connectionData, isRemote = false) {
     try {
       const modeling = this.modeler.get('modeling');
       let hasChanges = false;
@@ -606,7 +953,6 @@ export class BpmnCollaborationDemo {
         const currentProps = {
           id: connection.businessObject?.id,
           name: connection.businessObject?.name || '',
-          $type: connection.businessObject?.$type
         };
         
         if (!this.isDataEqual(currentProps, connectionData.businessObject)) {
@@ -615,19 +961,19 @@ export class BpmnCollaborationDemo {
         }
       }
       
-      // waypoint 업데이트 (경로 변경)
-      if (connectionData.waypoints && connectionData.waypoints.length > 0) {
+      // waypoint 업데이트 - 요소 자동 이동 시에는 스킵
+      if (connectionData.waypoints && connectionData.waypoints.length > 0 && !isRemote) {
         const currentWaypoints = connection.waypoints || [];
         const newWaypoints = connectionData.waypoints;
         
         // waypoint 비교 (좌표가 다를 때만 업데이트)
         const waypointsChanged = !this.isDataEqual(currentWaypoints, newWaypoints);
         
-        if (waypointsChanged) {
+        // 원격 변경이 아니고, 실제 waypoint 변경이 있을 때만 업데이트
+        if (waypointsChanged && !this.isConnectedElementMoving(connection)) {
           try {
             modeling.updateWaypoints(connection, newWaypoints);
             hasChanges = true;
-            // Waypoint 업데이트 로그는 통합 메시지에서 처리
           } catch (waypointError) {
             console.error('Waypoint 업데이트 실패:', waypointError);
           }
@@ -635,7 +981,7 @@ export class BpmnCollaborationDemo {
       }
       
       if (hasChanges) {
-        console.log('연결선 waypoint 업데이트됨, 연결 업데이트됨, Y.js 연결 동기화됨:', connection.id);
+        console.log(`연결선 업데이트 적용됨 ${isRemote ? '(원격)' : '(로컬)'}:`, connection.id);
       }
     } catch (error) {
       console.error('연결 업데이트 오류:', error);
@@ -920,7 +1266,6 @@ export class BpmnCollaborationDemo {
         this.addLog(`기존 문서에 연결되었습니다: ${this.documentId}`, 'info');
       }
 
-      this.updateDocumentInfo();
     } catch (error) {
       throw new Error(`문서 처리 오류: ${error.message}`);
     }
@@ -1284,17 +1629,27 @@ export class BpmnCollaborationDemo {
    */
   syncElementToYjs(element) {
     try {
+      // 동기화가 비활성화되어 있으면 스킵
+      if (!this.synchronizationEnabled) {
+        return;
+      }
+      
+      // 원격 변경 처리 중일 때는 동기화하지 않음 (무한 루프 방지)
+      if (this.isApplyingRemoteChange) {
+        return;
+      }
+      
       // 라벨은 동기화하지 않음
       if (element.id.includes('_label')) {
         return;
       }
       
+      // 요소 데이터 구성 (이제 element.id는 이미 협업 ID)
       const elementData = {
         type: element.type,
         businessObject: element.businessObject ? {
-          id: element.businessObject.id,
+          id: element.id,  // 이미 협업 ID
           name: element.businessObject.name || '',
-          $type: element.businessObject.$type
         } : {},
         position: element.x !== undefined ? {
           x: element.x || 0,
@@ -1325,9 +1680,12 @@ export class BpmnCollaborationDemo {
         const isNewSync = !this.isDataEqual(lastSyncedData, newData);
         
         if (isDataChanged && isNewSync) {
-          this.yConnections.set(element.id, newData);
+          // 트랜잭션으로 감싸서 origin 설정
+          this.yjsDoc.transact(() => {
+            this.yConnections.set(element.id, newData);
+          }, this.clientId);
           this.lastSyncedData.set(element.id, JSON.parse(JSON.stringify(newData))); // 깊은 복사
-          // Y.js 동기화 로그는 연결 업데이트 시 통합 메시지에서 처리
+          console.log('Y.js 연결 동기화됨:', element.id);
         }
       } else {
         const existingData = this.yElements.get(element.id);
@@ -1338,7 +1696,10 @@ export class BpmnCollaborationDemo {
         const isNewSync = !this.isDataEqual(lastSyncedData, elementData);
         
         if (isDataChanged && isNewSync) {
-          this.yElements.set(element.id, elementData);
+          // 트랜잭션으로 감싸서 origin 설정
+          this.yjsDoc.transact(() => {
+            this.yElements.set(element.id, elementData);
+          }, this.clientId);
           this.lastSyncedData.set(element.id, JSON.parse(JSON.stringify(elementData))); // 깊은 복사
           console.log('Y.js 요소 동기화됨:', element.id, '위치:', elementData.position);
         } else {
@@ -1347,6 +1708,50 @@ export class BpmnCollaborationDemo {
       }
     } catch (error) {
       console.error('Y.js 동기화 오류:', error);
+      this.handleSyncError(error, 'syncElementToYjs');
+    }
+  }
+
+  /**
+   * Y.js에서 요소 제거 (삭제 시)
+   */
+  removeElementFromYjs(element) {
+    try {
+      // 동기화가 비활성화되어 있으면 스킵
+      if (!this.synchronizationEnabled) {
+        return;
+      }
+      
+      // 원격 변경 처리 중일 때는 동기화하지 않음 (무한 루프 방지)
+      if (this.isApplyingRemoteChange) {
+        return;
+      }
+      
+      // 라벨은 동기화하지 않음
+      if (element.id.includes('_label')) {
+        return;
+      }
+      
+      console.log(`Y.js에서 요소 제거: ${element.id}`);
+      
+      // 연결인지 요소인지 구분하여 제거
+      this.yjsDoc.transact(() => {
+        if (element.type === 'connection' || element.waypoints) {
+          // 연결선 제거
+          this.yConnections.delete(element.id);
+          console.log(`Y.js에서 연결 제거됨: ${element.id}`);
+        } else {
+          // 일반 요소 제거
+          this.yElements.delete(element.id);
+          console.log(`Y.js에서 요소 제거됨: ${element.id}`);
+        }
+      }, this.clientId);
+      
+      this.addLog(`요소 삭제됨: ${element.id}`, 'document-changed');
+      
+    } catch (error) {
+      console.error('Y.js 요소 제거 오류:', error);
+      this.handleSyncError(error, 'removeElementFromYjs');
     }
   }
 
@@ -1357,14 +1762,34 @@ export class BpmnCollaborationDemo {
     if (!this.isConnected) return;
 
     try {
+      // 원격 변경 처리 중일 때는 Y.js 동기화하지 않음 (무한 루프 방지)
+      if (this.isApplyingRemoteChange) {
+        console.log(`원격 변경 중이므로 Y.js 동기화 스킵: ${action}`);
+        return;
+      }
+      
       // 변경 이력 추적
       this.lastChangeTime = Date.now();
       // commandStack 이벤트는 event.context.element에 요소가 있음
       this.lastChangedElement = event.context ? event.context.element : null;
       
-      // Y.js로 변경사항 동기화
+      // 요소 생성 시 즉시 동기화 (ID 교체는 Y.js 레벨에서 처리)
+      if (action === 'create' && this.lastChangedElement) {
+        console.log(`새 요소 생성 감지: ${this.lastChangedElement.id}, 즉시 Y.js 동기화`);
+      }
+      
+      // Y.js로 변경사항 동기화 (로컬 변경만)
       if (this.lastChangedElement) {
-        this.syncElementToYjs(this.lastChangedElement);
+        if (action === 'delete') {
+          // 삭제 시에는 Y.js에서 요소 제거
+          console.log(`삭제 처리: ${this.lastChangedElement.id}, 연결상태: ${this.isConnected}`);
+          this.removeElementFromYjs(this.lastChangedElement);
+        } else {
+          // 생성, 수정, 이동 등은 요소 동기화
+          this.syncElementToYjs(this.lastChangedElement);
+        }
+      } else {
+        console.log(`변경된 요소 없음, action: ${action}`);
       }
       
       this.syncCount++;
@@ -1373,8 +1798,88 @@ export class BpmnCollaborationDemo {
       this.addLog(`다이어그램 ${action} 동작 Y.js 동기화`, 'document-changed');
     } catch (error) {
       console.error('다이어그램 변경 처리 오류:', error);
+      this.handleSyncError(error, 'handleDiagramChange');
     }
   }
+
+  /**
+   * 요소 생성 직후 협업 ID로 교체
+   */
+  handleElementCreateWithCollaborativeId(event) {
+    try {
+      // 원격 변경 중이거나 연결되지 않은 경우 스킵
+      if (this.isApplyingRemoteChange || !this.isConnected) {
+        return;
+      }
+
+      const element = event.context?.element;
+      if (!element || !element.businessObject) {
+        return;
+      }
+
+      // 라벨이나 이미 협업 ID인 경우 스킵
+      if (element.id?.includes('_label') || this.isCollaborativeId(element.id)) {
+        return;
+      }
+
+      console.log(`요소 생성 직후 협업 ID 교체 시도: ${element.id}`);
+
+      // 위치 정보 추출
+      const position = {
+        x: element.x || 0,
+        y: element.y || 0
+      };
+
+      // 협업 ID 생성
+      const collaborativeId = this.generateCollaborativeId(
+        element.type || element.businessObject?.$type,
+        position,
+        Date.now()
+      );
+
+      // ID 중복 확인
+      const elementRegistry = this.modeler.get('elementRegistry');
+      const existingElement = elementRegistry.get(collaborativeId);
+      if (existingElement) {
+        console.log(`협업 ID 충돌 감지: ${collaborativeId}, 원본 ID 유지`);
+        return;
+      }
+
+      // modeling을 사용해서 안전하게 ID 변경
+      const modeling = this.modeler.get('modeling');
+      
+      // 원격 변경 플래그 설정 (재귀 방지)
+      const wasApplyingRemoteChange = this.isApplyingRemoteChange;
+      this.isApplyingRemoteChange = true;
+      
+      try {
+        console.log(`요소 ID 협업용으로 교체: ${element.id} → ${collaborativeId}`);
+        
+        // ID 업데이트
+        modeling.updateProperties(element, { id: collaborativeId });
+        
+        this.addLog(`협업 ID 즉시 교체: ${collaborativeId}`, 'success');
+        
+      } finally {
+        // 플래그 복원
+        this.isApplyingRemoteChange = wasApplyingRemoteChange;
+      }
+
+    } catch (error) {
+      console.error('요소 생성 직후 ID 교체 오류:', error);
+    }
+  }
+
+  /**
+   * 협업 ID인지 확인 (접두사 기반)
+   */
+  isCollaborativeId(id) {
+    const collaborativePrefixes = ['Activity_', 'Event_', 'Gateway_', 'Flow_', 'StartEvent_', 'EndEvent_', 'Element_'];
+    return collaborativePrefixes.some(prefix => 
+      id.startsWith(prefix) && id.includes('_') && id.length > prefix.length + 7 // 해시가 7자리이므로
+    );
+  }
+
 
   /**
    * 문서 변경사항 전송
@@ -1544,18 +2049,6 @@ export class BpmnCollaborationDemo {
     usersList.innerHTML = usersHtml;
   }
 
-  /**
-   * 문서 정보 업데이트
-   */
-  updateDocumentInfo() {
-    if (this.currentDocument) {
-      document.getElementById('currentDocId').textContent = this.currentDocument.id;
-      document.getElementById('docCreatedAt').textContent = 
-        new Date(this.currentDocument.createdAt).toLocaleString();
-      document.getElementById('docLastModified').textContent = 
-        new Date().toLocaleString();
-    }
-  }
 
   /**
    * UI 업데이트
@@ -1655,6 +2148,174 @@ export class BpmnCollaborationDemo {
       userNameInput.value = `사용자${this.clientId}`;
       this.userName = userNameInput.value;
     }
+  }
+
+  /**
+   * 이벤트 핸들러 설정
+   */
+  setupEventHandlers() {
+    // 연결 업데이트 이벤트 핸들러
+    this.eventManager.on('connection.update', (eventData) => {
+      console.log('연결 업데이트 이벤트 처리됨:', eventData.elementId);
+    });
+    
+    // Y.js 연결 변경 이벤트 핸들러
+    this.eventManager.on('yjs.connection.change', (eventData) => {
+      console.log('Y.js 연결 변경 이벤트 처리됨:', eventData.elementId);
+    });
+    
+    // 요소 업데이트 이벤트 핸들러
+    this.eventManager.on('element.update', (eventData) => {
+      console.log('요소 업데이트 이벤트 처리됨:', eventData.elementId);
+    });
+    
+    // 요소 이동 이벤트 핸들러
+    this.eventManager.on('element.move', (eventData) => {
+      console.log('요소 이동 이벤트 처리됨:', eventData.elementId);
+    });
+  }
+
+
+  /**
+   * 에러 발생 시 처리 (자동 동기화 중지)
+   */
+  handleSyncError(error, context = '') {
+    this.errorCount++;
+    console.error(`동기화 에러 ${this.errorCount}/${this.maxErrors} [${context}]:`, error);
+    
+    if (this.autoStopOnError && this.errorCount >= this.maxErrors && this.synchronizationEnabled) {
+      console.error('🚨 최대 에러 횟수 초과, 자동 동기화 중지');
+      this.addLog(`에러가 ${this.maxErrors}회 발생하여 자동으로 동기화가 중지되었습니다.`, 'error');
+      
+      // 자동 동기화 중지
+      this.stopSynchronization('auto-error');
+      
+      // 사용자에게 알림
+      alert(`동기화 에러가 ${this.maxErrors}회 발생하여 자동으로 중지되었습니다.\n문제를 확인한 후 수동으로 재개해주세요.`);
+    }
+  }
+
+  /**
+   * 에러 카운터 리셋
+   */
+  resetErrorCount() {
+    this.errorCount = 0;
+  }
+
+  /**
+   * 동기화 중지 (내부 함수)
+   */
+  stopSynchronization(reason = 'manual') {
+    if (!this.synchronizationEnabled) return;
+    
+    this.synchronizationEnabled = false;
+    
+    // 진행 중인 재시도들 정리
+    this.connectionRetryCount.clear();
+    this.moveTimeouts.clear();
+    
+    console.log(`🛑 동기화가 중지되었습니다 (${reason})`);
+    this.addLog(`동기화가 중지되었습니다. 로컬 변경사항만 유효합니다. (사유: ${reason})`, 'warning');
+    
+    // 버튼 상태 업데이트
+    this.updateSyncButton('stopped');
+  }
+
+  /**
+   * 동기화 재개 (내부 함수)
+   */
+  startSynchronization() {
+    if (this.synchronizationEnabled) return;
+    
+    this.synchronizationEnabled = true;
+    this.resetErrorCount(); // 에러 카운터 리셋
+    
+    console.log('▶️ 동기화가 재개되었습니다');
+    this.addLog('동기화가 재개되었습니다. 원격 동기화가 활성화됩니다.', 'success');
+    
+    // 버튼 상태 업데이트
+    this.updateSyncButton('started');
+  }
+
+  /**
+   * 동기화 버튼 상태 업데이트
+   */
+  updateSyncButton(state) {
+    const button = document.getElementById('stopSyncBtn');
+    if (!button) return;
+    
+    if (state === 'stopped') {
+      button.textContent = '동기화 재개';
+      button.style.background = 'linear-gradient(135deg, #2ed573 0%, #17c0eb 100%)';
+    } else {
+      button.textContent = '동기화 중지';
+      button.style.background = 'linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%)';
+    }
+  }
+
+  /**
+   * 동기화 토글 (중지/재개)
+   */
+  toggleSynchronization() {
+    try {
+      if (!this.isConnected) {
+        alert('협업에 연결되지 않은 상태입니다.');
+        return;
+      }
+
+      if (this.synchronizationEnabled) {
+        this.stopSynchronization('manual');
+      } else {
+        this.startSynchronization();
+      }
+      
+    } catch (error) {
+      console.error('동기화 토글 오류:', error);
+      this.handleSyncError(error, 'toggleSynchronization');
+    }
+  }
+
+  /**
+   * 협업용 결정론적 ID 생성
+   */
+  generateCollaborativeId(type, position, timestamp = Date.now()) {
+    // 위치를 50px 그리드로 정규화
+    const gridX = Math.round(position.x / 50) * 50;
+    const gridY = Math.round(position.y / 50) * 50;
+    
+    // 타임스탬프를 100ms 단위로 정규화 (동시 생성 시 같은 시간대)
+    const normalizedTime = Math.floor(timestamp / 100) * 100;
+    
+    // 해시 생성용 문자열
+    const hashInput = `${type}_${gridX}_${gridY}_${normalizedTime}_${this.documentId}`;
+    
+    // 간단한 해시 생성
+    let hash = 0;
+    for (let i = 0; i < hashInput.length; i++) {
+      hash = ((hash << 5) - hash) + hashInput.charCodeAt(i);
+      hash = hash & hash; // 32bit 정수로 변환
+    }
+    
+    // 절댓값으로 양수 해시 생성 후 16진수 변환
+    const hexHash = Math.abs(hash).toString(16).substring(0, 7);
+    
+    // BPMN 타입별 접두사
+    const prefix = this.getElementPrefix(type);
+    
+    return `${prefix}_${hexHash}`;
+  }
+
+  /**
+   * BPMN 요소 타입별 접두사 반환
+   */
+  getElementPrefix(type) {
+    if (type.includes('Task') || type.includes('Activity')) return 'Activity';
+    if (type.includes('Gateway')) return 'Gateway';
+    if (type.includes('StartEvent')) return 'StartEvent';
+    if (type.includes('EndEvent')) return 'EndEvent';
+    if (type.includes('Event')) return 'Event';
+    if (type.includes('SequenceFlow')) return 'Flow';
+    return 'Element';
   }
 
   /**

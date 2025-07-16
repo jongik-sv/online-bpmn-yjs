@@ -2,6 +2,7 @@
  * 협업 관리자
  * 실시간 협업 세션과 사용자 상호작용을 관리
  */
+import UnifiedEventManager from './UnifiedEventManager.js';
 
 export class CollaborationManager {
   constructor(options = {}) {
@@ -16,6 +17,15 @@ export class CollaborationManager {
 
     this.eventBus = options.eventBus;
     this.logger = options.logger;
+    
+    // 이벤트 중복 방지 시스템 (서버용)
+    this.eventManager = new UnifiedEventManager({
+      windowMs: 1000,           // 1초 중복 방지 윈도우
+      queueSize: 50,            // 서버는 더 큰 큐 (50개)
+      batchDelay: 100,          // 서버는 더 긴 배치 지연 (100ms)
+      enableBatching: true,     // 배치 처리 활성화
+      enableConsolidation: true // 이벤트 통합 활성화
+    });
     
     // 활성 협업 세션들
     this.activeSessions = new Map();
@@ -52,6 +62,7 @@ export class CollaborationManager {
       this._setupEventListeners();
       
       // 정리 타이머 시작
+
       this._startCleanupTimer();
       
       this.isInitialized = true;
@@ -274,6 +285,46 @@ export class CollaborationManager {
     this.eventBus.on('user:disconnected', (data) => {
       this._handleUserDisconnection(data);
     });
+
+    // UnifiedEventManager 이벤트 핸들러 설정
+    this._setupUnifiedEventHandlers();
+  }
+
+  /**
+   * UnifiedEventManager 이벤트 핸들러 설정
+   * @private
+   */
+  _setupUnifiedEventHandlers() {
+    // 서버 브로드캐스트 이벤트 핸들러
+    this.eventManager.on('server.broadcast.change', (eventData) => {
+      this.logger.debug('서버 브로드캐스트 이벤트 처리됨:', {
+        elementId: eventData.elementId,
+        documentId: eventData.documentId,
+        sourceUserId: eventData.sourceUserId
+      });
+    });
+
+    // 서버 커서 업데이트 이벤트 핸들러
+    this.eventManager.on('server.cursor.update', (eventData) => {
+      this.logger.trace('서버 커서 업데이트 이벤트 처리됨:', {
+        userId: eventData.userId,
+        documentId: eventData.documentId,
+        position: eventData.position
+      });
+    });
+
+    // 이벤트 통계 로깅 (주기적)
+    setInterval(() => {
+      const stats = this.eventManager.getStats();
+      if (stats.totalEmitted > 0) {
+        this.logger.info('서버 이벤트 중복 방지 통계:', {
+          totalEmitted: stats.totalEmitted,
+          duplicatesFiltered: stats.duplicatesFiltered,
+          duplicateRate: stats.deduplicator.duplicateRate,
+          batchesProcessed: stats.batchesProcessed
+        });
+      }
+    }, 60000); // 1분마다
   }
 
   /**
@@ -282,6 +333,36 @@ export class CollaborationManager {
    * @param {Object} data - 변경 데이터
    */
   _broadcastDocumentChange(data) {
+    // 서버 측 중복 방지 적용
+    const eventData = {
+      elementId: data.change?.elementId || data.change?.id,
+      action: 'broadcastChange',
+      documentId: data.documentId,
+      sourceUserId: data.userId,
+      changeType: data.change?.type,
+      timestamp: Date.now()
+    };
+
+    const shouldProcess = this.eventManager.emit('server.broadcast.change', eventData);
+    if (!shouldProcess) {
+      this.logger.debug('중복 브로드캐스트 무시됨:', {
+        documentId: data.documentId,
+        elementId: eventData.elementId,
+        sourceUserId: data.userId
+      });
+      return;
+    }
+
+    // 실제 브로드캐스트 처리
+    this._processBroadcastChange(data);
+  }
+
+  /**
+   * 실제 브로드캐스트 처리
+   * @private
+   * @param {Object} data - 변경 데이터
+   */
+  _processBroadcastChange(data) {
     const sessions = this.getDocumentSessions(data.documentId);
     
     sessions.forEach(session => {
@@ -294,6 +375,12 @@ export class CollaborationManager {
           timestamp: Date.now()
         });
       }
+    });
+
+    this.logger.debug('브로드캐스트 완료:', {
+      documentId: data.documentId,
+      sessions: sessions.length,
+      sourceUserId: data.userId
     });
   }
 
@@ -344,6 +431,24 @@ export class CollaborationManager {
    * @param {Object} cursor - 커서 정보
    */
   _updateCursor(userId, documentId, cursor) {
+    // 커서 업데이트 중복 방지 (위치 기반)
+    const eventData = {
+      elementId: `cursor_${userId}`,
+      action: 'updateCursor',
+      userId: userId,
+      documentId: documentId,
+      position: {
+        x: Math.round((cursor.x || 0) / 10) * 10, // 10px 단위로 반올림
+        y: Math.round((cursor.y || 0) / 10) * 10
+      }
+    };
+
+    const shouldProcess = this.eventManager.emit('server.cursor.update', eventData);
+    if (!shouldProcess) {
+      // 중복 커서 업데이트 무시 (로그 레벨을 trace로 낮춤)
+      return;
+    }
+
     const key = `${userId}:${documentId}`;
     
     this.cursors.set(key, {

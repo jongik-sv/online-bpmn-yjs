@@ -10,6 +10,9 @@
     <link rel="stylesheet" href="https://unpkg.com/bpmn-js@17.0.0/dist/assets/diagram-js.css">
     <link rel="stylesheet" href="https://unpkg.com/bpmn-js@17.0.0/dist/assets/bpmn-font/css/bpmn.css">
     
+    <!-- Monaco Editor CSS -->
+    <link rel="stylesheet" data-name="vs/editor/editor.main" href="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/editor/editor.main.css">
+    
     <!-- Demo CSS -->
     <style>
         * {
@@ -312,6 +315,95 @@
             border-left-color: #ffa502;
         }
 
+        /* XML 뷰어 모달 스타일 */
+        .modal {
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-content {
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+            max-width: 90vw;
+            max-height: 90vh;
+            overflow: hidden;
+        }
+
+        .xml-viewer-content {
+            width: 80vw;
+            height: 70vh;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid #e1e5e9;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .modal-header h3 {
+            margin: 0;
+            font-size: 1.2rem;
+            font-weight: 600;
+        }
+
+        .modal-actions {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .modal-actions .btn {
+            background: rgba(255,255,255,0.2);
+            border: 1px solid rgba(255,255,255,0.3);
+            color: white;
+            padding: 0.5rem 1rem;
+            font-size: 0.8rem;
+            margin: 0;
+            width: auto;
+        }
+
+        .modal-actions .btn:hover {
+            background: rgba(255,255,255,0.3);
+        }
+
+        .close {
+            color: white;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+            line-height: 1;
+        }
+
+        .close:hover {
+            opacity: 0.7;
+        }
+
+        .modal-body {
+            padding: 0;
+            height: calc(100% - 80px);
+            display: flex;
+            flex-direction: column;
+        }
+
+        #xmlEditor {
+            flex: 1;
+            border: none !important;
+            height: 100% !important;
+        }
+
         .activity-log {
             max-height: 200px;
             overflow-y: auto;
@@ -474,17 +566,11 @@
                 <button class="btn" id="connectBtn" onclick="connectToServer()">
                     협업 시작
                 </button>
+                <button class="btn" id="stopSyncBtn" onclick="toggleSynchronization()" style="background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%); margin-top: 0.5rem;">
+                    동기화 중지
+                </button>
             </div>
 
-            <div class="sidebar-section">
-                <h3>문서 정보</h3>
-                <div class="document-info" id="documentInfo">
-                    <h4>현재 문서</h4>
-                    <p>문서 ID: <span id="currentDocId">-</span></p>
-                    <p>생성 시간: <span id="docCreatedAt">-</span></p>
-                    <p>마지막 수정: <span id="docLastModified">-</span></p>
-                </div>
-            </div>
 
             <div class="sidebar-section">
                 <h3>참여자 (<span id="userCount">0</span>명)</h3>
@@ -515,6 +601,9 @@
                 <button class="toolbar-btn" onclick="showStatistics()" title="통계 보기">
                     📊
                 </button>
+                <button class="toolbar-btn" onclick="showXmlViewer()" title="XML 뷰어">
+                    📝
+                </button>
             </div>
             
             <div id="canvas"></div>
@@ -526,12 +615,261 @@
         <div class="notification-content"></div>
     </div>
 
+    <!-- XML 뷰어 모달 -->
+    <div id="xmlViewerModal" class="modal" style="display: none;">
+        <div class="modal-content xml-viewer-content">
+            <div class="modal-header">
+                <h3>📝 BPMN XML 뷰어</h3>
+                <div class="modal-actions">
+                    <button class="btn" onclick="downloadXml()" style="margin-right: 10px;">
+                        💾 XML 다운로드
+                    </button>
+                    <button class="btn" onclick="copyXmlToClipboard()">
+                        📋 복사
+                    </button>
+                    <span class="close" onclick="closeXmlViewer()">&times;</span>
+                </div>
+            </div>
+            <div class="modal-body">
+                <div id="xmlEditor"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Monaco Editor -->
+    <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js"></script>
+
     <!-- 모든 라이브러리와 스크립트는 Webpack으로 번들링됩니다 -->
     <script>
         // BPMN 폰트 로딩 확인
         document.fonts.ready.then(() => {
             console.log('모든 폰트가 로드되었습니다.');
         });
+
+        // Monaco Editor 전역 변수
+        let xmlEditor = null;
+        let currentXmlContent = '';
+
+        // Monaco Editor 초기화 함수
+        function initializeMonacoEditor() {
+            return new Promise((resolve, reject) => {
+                if (window.monaco) {
+                    resolve(window.monaco);
+                    return;
+                }
+
+                require.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs' } });
+                require(['vs/editor/editor.main'], (monaco) => {
+                    window.monaco = monaco;
+                    resolve(monaco);
+                }, reject);
+            });
+        }
+
+        // 디버깅: 사용 가능한 BPMN 인스턴스 확인
+        function debugBpmnInstances() {
+            console.log('=== BPMN 인스턴스 디버깅 ===');
+            console.log('window.demo:', window.demo);
+            console.log('window.demo.modeler:', window.demo?.modeler);
+            console.log('window.modeler:', window.modeler);
+            console.log('window.bpmnViewer:', window.bpmnViewer);
+            
+            const canvasElement = document.querySelector('#canvas');
+            console.log('Canvas element:', canvasElement);
+            console.log('Canvas._bpmnjs:', canvasElement?._bpmnjs);
+            
+            // DOM에서 다른 가능한 인스턴스 찾기
+            const allElements = document.querySelectorAll('*');
+            for (let element of allElements) {
+                if (element._bpmnjs || element.bpmnjs || element.modeler) {
+                    console.log('Found BPMN instance on element:', element, {
+                        _bpmnjs: element._bpmnjs,
+                        bpmnjs: element.bpmnjs,
+                        modeler: element.modeler
+                    });
+                }
+            }
+        }
+
+        // XML 뷰어 표시 함수
+        async function showXmlViewer() {
+            try {
+                // 디버깅 정보 출력
+                debugBpmnInstances();
+                
+                // 현재 BPMN XML 추출
+                let xmlResult = null;
+                
+                // 1. 전역 demo 인스턴스에서 modeler 확인
+                if (window.demo && window.demo.modeler) {
+                    xmlResult = await window.demo.modeler.saveXML({ format: true });
+                    currentXmlContent = xmlResult.xml;
+                }
+                // 2. 전역 modeler 확인
+                else if (window.modeler) {
+                    xmlResult = await window.modeler.saveXML({ format: true });
+                    currentXmlContent = xmlResult.xml;
+                }
+                // 3. 전역 bpmnViewer 확인
+                else if (window.bpmnViewer && window.bpmnViewer.saveXML) {
+                    xmlResult = await window.bpmnViewer.saveXML({ format: true });
+                    currentXmlContent = xmlResult.xml;
+                }
+                // 4. DOM에서 BPMN 인스턴스 찾기
+                else {
+                    const canvasElement = document.querySelector('#canvas');
+                    if (canvasElement && canvasElement._bpmnjs) {
+                        xmlResult = await canvasElement._bpmnjs.saveXML({ format: true });
+                        currentXmlContent = xmlResult.xml;
+                    } else {
+                        throw new Error('BPMN 모델러 인스턴스를 찾을 수 없습니다.');
+                    }
+                }
+                
+                console.log('추출된 XML 소스:', xmlResult ? 'BPMN 인스턴스에서 추출' : '기본 템플릿 사용');
+
+                // 모달 표시
+                const modal = document.getElementById('xmlViewerModal');
+                modal.style.display = 'flex';
+
+                // Monaco Editor 초기화
+                await initializeMonacoEditor();
+                
+                if (!xmlEditor) {
+                    const editorContainer = document.getElementById('xmlEditor');
+                    xmlEditor = window.monaco.editor.create(editorContainer, {
+                        value: currentXmlContent,
+                        language: 'xml',
+                        theme: 'vs',
+                        readOnly: true,
+                        automaticLayout: true,
+                        wordWrap: 'on',
+                        minimap: { enabled: false },
+                        scrollBeyondLastLine: false,
+                        fontSize: 14,
+                        lineNumbers: 'on',
+                        folding: true,
+                        foldingStrategy: 'indentation'
+                    });
+                } else {
+                    xmlEditor.setValue(currentXmlContent);
+                }
+                
+                console.log('XML 뷰어가 열렸습니다.');
+                
+            } catch (error) {
+                console.error('XML 뷰어 열기 오류:', error);
+                showNotification('XML을 가져오는 중 오류가 발생했습니다.', 'error');
+            }
+        }
+
+        // XML 뷰어 닫기 함수
+        function closeXmlViewer() {
+            const modal = document.getElementById('xmlViewerModal');
+            modal.style.display = 'none';
+        }
+
+        // XML 다운로드 함수
+        function downloadXml() {
+            try {
+                const blob = new Blob([currentXmlContent], { type: 'application/xml' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `bpmn-diagram-${new Date().toISOString().slice(0, 19).replace(/[:.]/g, '-')}.bpmn`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                
+                showNotification('XML 파일이 다운로드되었습니다.', 'success');
+                console.log('XML 파일 다운로드 완료');
+                
+            } catch (error) {
+                console.error('XML 다운로드 오류:', error);
+                showNotification('다운로드 중 오류가 발생했습니다.', 'error');
+            }
+        }
+
+        // XML 클립보드 복사 함수
+        async function copyXmlToClipboard() {
+            try {
+                await navigator.clipboard.writeText(currentXmlContent);
+                showNotification('XML이 클립보드에 복사되었습니다.', 'success');
+                console.log('XML 클립보드 복사 완료');
+                
+            } catch (error) {
+                console.error('클립보드 복사 오류:', error);
+                
+                // Fallback: 텍스트 영역을 사용한 복사
+                try {
+                    const textArea = document.createElement('textarea');
+                    textArea.value = currentXmlContent;
+                    document.body.appendChild(textArea);
+                    textArea.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(textArea);
+                    showNotification('XML이 클립보드에 복사되었습니다.', 'success');
+                } catch (fallbackError) {
+                    showNotification('클립보드 복사에 실패했습니다.', 'error');
+                }
+            }
+        }
+
+        // 모달 바깥 클릭 시 닫기
+        document.addEventListener('click', (event) => {
+            const modal = document.getElementById('xmlViewerModal');
+            if (event.target === modal) {
+                closeXmlViewer();
+            }
+        });
+
+        // ESC 키로 모달 닫기
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape') {
+                const modal = document.getElementById('xmlViewerModal');
+                if (modal.style.display === 'flex') {
+                    closeXmlViewer();
+                }
+            }
+        });
+
+        // 동기화 토글 전역 함수
+        function toggleSynchronization() {
+            if (window.demo && window.demo.toggleSynchronization) {
+                window.demo.toggleSynchronization();
+            } else {
+                alert('협업 데모가 초기화되지 않았습니다.');
+            }
+        }
+
+        // 알림 표시 함수 (기존 함수가 없다면 추가)
+        function showNotification(message, type = 'info') {
+            const notification = document.getElementById('notification');
+            const content = notification.querySelector('.notification-content');
+            
+            if (!content) {
+                notification.innerHTML = `<div class="notification-content">${message}</div>`;
+            } else {
+                content.textContent = message;
+            }
+            
+            // 기존 클래스 제거
+            notification.classList.remove('error', 'warning', 'success');
+            
+            // 타입에 따른 클래스 추가
+            if (type !== 'info') {
+                notification.classList.add(type);
+            }
+            
+            // 알림 표시
+            notification.classList.add('show');
+            
+            // 3초 후 자동 숨김
+            setTimeout(() => {
+                notification.classList.remove('show');
+            }, 3000);
+        }
     </script>
 </body>
 </html>
