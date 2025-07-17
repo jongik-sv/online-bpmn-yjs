@@ -20,28 +20,13 @@ console.log('- Y:', typeof Y);
 console.log('- WebsocketProvider:', typeof WebsocketProvider);
 console.log('- BpmnJS:', typeof BpmnJS);
 
-// 데모 클래스 import
-import { BpmnCollaborationDemo } from './demo';
+// demo.js를 import하여 자동 초기화
+import './demo.js';
 
-// 전역 함수들
-let demo;
-
-function initDemo() {
-  console.log('Y.js 라이브러리가 성공적으로 로드되었습니다.');
-  
-  // 데모 앱 초기화
-  demo = new BpmnCollaborationDemo();
-  window.demo = demo; // 디버깅용
-}
-
-// 전역 함수들 노출
-window.initDemo = initDemo;
-window.connectToServer = () => demo?.connectToServer();
-window.resetZoom = () => demo?.resetZoom();
-window.exportDiagram = () => demo?.exportDiagram();
-window.showStatistics = () => demo?.showStatistics();
-
-// DOM 로드 완료 후 초기화
-document.addEventListener('DOMContentLoaded', initDemo);
+// 전역 함수들 노출 (호환성용)
+window.connectToServer = () => window.demo?.connectToServer();
+window.resetZoom = () => window.demo?.resetZoom();
+window.exportDiagram = () => window.demo?.exportDiagram();
+window.showStatistics = () => window.demo?.showStatistics();
 
 console.log('BPMN 협업 데모 클라이언트 시작됨');

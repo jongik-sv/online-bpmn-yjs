@@ -1,3 +1,145 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+# Online BPMN Y.js Real-time Collaboration System
+
+## Project Overview
+
+This is a sophisticated real-time BPMN collaboration system built around Y.js CRDT (Conflict-free Replicated Data Type) technology. The system enables multiple users to simultaneously edit BPMN diagrams with automatic conflict resolution and real-time synchronization.
+
+## Common Development Commands
+
+### Development Setup
+```bash
+# Install all dependencies
+npm run install:all
+
+# Start development servers (run in separate terminals)
+npm run server          # Backend server (port 3001)
+npm run client          # Frontend dev server (port 8082)
+
+# Legacy simple server
+npm run legacy          # Simple server for testing
+```
+
+### Testing
+```bash
+npm test                # Run all tests
+npm run test:unit       # Unit tests only
+npm run test:integration # Integration tests
+npm run test:coverage   # Coverage report
+```
+
+### Code Quality
+```bash
+npm run lint            # ESLint checking
+npm run format          # Prettier formatting
+npm run build           # Test + lint
+npm run docs            # Generate JSDoc documentation
+```
+
+## Architecture Overview
+
+### Core Technologies
+- **Frontend**: Vanilla JavaScript with Webpack, BPMN.js for diagram editing
+- **Backend**: Node.js with Express.js, WebSocket for real-time communication
+- **Real-time Sync**: Y.js CRDT with WebSocket provider
+- **Testing**: Node.js built-in test runner with c8 for coverage
+
+### Key Directories
+- `src/` - Core diff-based synchronization library (reusable module)
+- `client/` - Frontend BPMN collaboration interface (port 8082)
+- `server/` - Express.js backend with WebSocket support (port 3001)
+- `tests/` - Comprehensive test suite
+- `doc/` - Architecture documentation (Korean)
+
+### Diff-based Synchronization Pattern
+The system follows a modular component design with Strategy pattern:
+- **BpmnStateExtractor**: Extracts current diagram state
+- **StandardDiffCalculator**: Computes differences between states
+- **BpmnDiffApplicator**: Applies changes to the diagram
+- **YjsAdapter**: Integrates with Y.js for collaboration
+
+### Event System
+- **EventBus**: Central event management
+- **UnifiedEventManager**: Deduplication and batch processing
+- **EventDeduplicator**: Prevents duplicate events within 1-second windows
+
+## Development Workflow
+
+### Standard Development Loop
+```bash
+# Terminal 1: Backend
+npm run server
+
+# Terminal 2: Frontend
+npm run client
+
+# Terminal 3: Testing
+npm test
+```
+
+### Client Development
+Entry point: `client/src/index.js` → `client/src/demo.js`
+Build: Webpack with HTML plugin
+Port: 8082
+
+### Server Development
+Entry point: `server/index.js` (auto-starting server)
+Services: Document/User/Session/Collaboration managers
+Port: 3001
+
+## Key Features
+
+### Real-time Collaboration
+- Multi-user editing with <300ms latency
+- Automatic conflict resolution via Y.js CRDT
+- Cursor tracking and user presence
+- Live synchronization
+
+### Performance Optimizations
+- Event deduplication (1-second window, 20-item queue)
+- Batch processing (50ms delay)
+- Incremental updates (only changed elements)
+- Memory management with efficient queues
+
+### API Structure
+- RESTful API for document management
+- WebSocket for real-time synchronization
+- Y.js integration with custom WebSocket provider
+
+## Testing Strategy
+
+### Unit Tests
+Individual component validation in `tests/unit/`
+
+### Integration Tests
+Multi-user collaboration scenarios in `tests/integration/`
+
+### Performance Tests
+Load testing with 15+ users in `tests/performance/`
+
+## Configuration
+
+### Environment Requirements
+- Node.js 18.0.0+
+- npm (package-lock.json present)
+- Separate client/server dev servers for development
+
+### Performance Tuning
+- Sync interval: 1000ms (configurable)
+- Batch size: 50 items (configurable)
+- Max state history: 50 (configurable)
+
+## Recent Development Status
+
+Based on commit history:
+- Y.js integration recently implemented
+- Error fixes for integration issues
+- Comprehensive event deduplication system
+- Performance optimization completed
+
 # Task Master AI - Claude Code Integration Guide
 
 ## Essential Commands

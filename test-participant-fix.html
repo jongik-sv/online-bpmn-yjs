@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>Participant & Activity Log Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-section { border: 1px solid #ccc; padding: 10px; margin: 10px 0; }
+        .success { color: green; }
+        .error { color: red; }
+    </style>
+</head>
+<body>
+    <h1>참여자 표시 및 활동 로그 테스트</h1>
+    
+    <div class="test-section">
+        <h2>현재 상태</h2>
+        <p>✅ 서버 실행 중: <span id="server-status">확인 중...</span></p>
+        <p>✅ 클라이언트 실행 중: <span id="client-status">확인 중...</span></p>
+    </div>
+
+    <div class="test-section">
+        <h2>수정 사항</h2>
+        <h3>1. 참여자 카운트 표시 수정</h3>
+        <ul>
+            <li>✅ <code>updateConnectedUsers</code> 함수에 user-count 업데이트 로직 추가</li>
+            <li>✅ 참여자가 없을 때 "협업 연결을 기다리는 중..." 메시지 표시</li>
+            <li>✅ 참여자 수에 따른 동적 UI 업데이트</li>
+        </ul>
+
+        <h3>2. 활동 로그 기능 추가</h3>
+        <ul>
+            <li>✅ <code>addActivityLog</code> 메서드 구현</li>
+            <li>✅ 시간 스탬프와 함께 로그 표시</li>
+            <li>✅ 다양한 이벤트 타입별 색상 구분 (success, error, user, change)</li>
+            <li>✅ 최대 50개 로그 유지</li>
+        </ul>
+
+        <h3>3. 이벤트 핸들러 업데이트</h3>
+        <ul>
+            <li>✅ 연결 설정 시 활동 로그</li>
+            <li>✅ 사용자 참가/떠남 활동 로그</li>
+            <li>✅ 문서/요소 변경 활동 로그</li>
+            <li>✅ 시스템 시작 활동 로그</li>
+        </ul>
+    </div>
+
+    <div class="test-section">
+        <h2>테스트 방법</h2>
+        <ol>
+            <li>브라우저에서 <a href="http://localhost:8082" target="_blank">http://localhost:8082</a> 열기</li>
+            <li>참여자 섹션에서 "(0명)" 표시 확인</li>
+            <li>활동 로그에서 "BPMN 협업 시스템이 시작되었습니다." 메시지 확인</li>
+            <li>새 브라우저 탭에서 같은 주소 열어서 참여자 수 증가 확인</li>
+            <li>활동 로그에서 사용자 참가 메시지 확인</li>
+            <li>BPMN 다이어그램 수정 시 활동 로그 업데이트 확인</li>
+        </ol>
+    </div>
+
+    <div class="test-section">
+        <h2>주요 변경 파일</h2>
+        <ul>
+            <li><code>client/src/BpmnCollaborationDemo.js</code> - 참여자 업데이트 및 활동 로그 메서드 추가</li>
+            <li><code>client/src/index.html</code> - 활동 로그 스타일 추가</li>
+        </ul>
+    </div>
+
+    <script>
+        // 서버 상태 확인
+        fetch('http://localhost:3001/health')
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('server-status').innerHTML = '<span class="success">정상 (' + data.status + ')</span>';
+            })
+            .catch(error => {
+                document.getElementById('server-status').innerHTML = '<span class="error">오류: ' + error.message + '</span>';
+            });
+
+        // 클라이언트 상태 확인
+        fetch('http://localhost:8082')
+            .then(response => {
+                if (response.ok) {
+                    document.getElementById('client-status').innerHTML = '<span class="success">정상</span>';
+                } else {
+                    document.getElementById('client-status').innerHTML = '<span class="error">응답 오류: ' + response.status + '</span>';
+                }
+            })
+            .catch(error => {
+                document.getElementById('client-status').innerHTML = '<span class="error">연결 오류: ' + error.message + '</span>';
+            });
+    </script>
+</body>
+</html>

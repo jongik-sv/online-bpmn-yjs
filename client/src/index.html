@@ -82,43 +82,52 @@
             display: flex;
             flex-direction: column;
             box-shadow: 2px 0 10px rgba(0,0,0,0.05);
+            overflow-y: auto;
         }
 
         .sidebar-section {
-            padding: 1.5rem;
+            padding: 1rem;
             border-bottom: 1px solid #e1e5e9;
+        }
+
+        .sidebar-section.user-info-section {
+            padding: 0.75rem;
         }
 
         .sidebar-section h3 {
             font-size: 0.9rem;
             font-weight: 600;
             color: #666;
-            margin-bottom: 1rem;
+            margin-bottom: 0.75rem;
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
 
+        .user-info-section h3 {
+            margin-bottom: 0.5rem;
+        }
+
         .user-info {
             background: #f8f9fa;
-            border-radius: 8px;
-            padding: 1rem;
-            margin-bottom: 1rem;
+            border-radius: 6px;
+            padding: 0.75rem;
+            margin-bottom: 0.5rem;
         }
 
         .user-info label {
             display: block;
-            font-size: 0.8rem;
+            font-size: 0.75rem;
             color: #666;
-            margin-bottom: 0.5rem;
+            margin-bottom: 0.3rem;
             font-weight: 500;
         }
 
         .user-info input {
             width: 100%;
-            padding: 0.75rem;
+            padding: 0.5rem;
             border: 1px solid #ddd;
-            border-radius: 6px;
-            font-size: 0.9rem;
+            border-radius: 4px;
+            font-size: 0.85rem;
             transition: border-color 0.3s ease;
         }
 
@@ -132,14 +141,14 @@
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
             border: none;
-            padding: 0.75rem 1.5rem;
-            border-radius: 6px;
+            padding: 0.6rem 1rem;
+            border-radius: 4px;
             cursor: pointer;
-            font-size: 0.9rem;
+            font-size: 0.8rem;
             font-weight: 500;
             transition: all 0.3s ease;
             width: 100%;
-            margin-top: 0.5rem;
+            margin-top: 0.3rem;
         }
 
         .btn:hover {
@@ -434,6 +443,28 @@
             border-left-color: #ffa502;
         }
 
+        .log-item.log-success {
+            border-left-color: #2ed573;
+        }
+
+        .log-item.log-error {
+            border-left-color: #ff4757;
+        }
+
+        .log-item.log-user {
+            border-left-color: #5352ed;
+        }
+
+        .log-item.log-change {
+            border-left-color: #ffa502;
+        }
+
+        .log-time {
+            font-weight: bold;
+            margin-right: 8px;
+            color: #888;
+        }
+
         .document-info {
             background: #f8f9fa;
             border-radius: 8px;
@@ -542,39 +573,42 @@
         <h1>🎯 Online BPMN Diff - 실시간 협업 데모</h1>
         <div class="header-info">
             <div class="status-indicator">
-                <div class="status-dot" id="connectionStatus"></div>
-                <span id="connectionText">연결 중...</span>
+                <div class="status-dot" id="connection-status"></div>
+                <span id="connection-text">연결 안됨</span>
             </div>
-            <div>문서: <span id="documentId">-</span></div>
-            <div>클라이언트: <span id="clientId">-</span></div>
-            <div>동기화: <span id="syncCount">0</span>회</div>
+            <div>문서: <span id="document-name">-</span></div>
+            <div>클라이언트: <span id="client-id">-</span></div>
+            <div>동기화: <span id="sync-count">0</span>회</div>
         </div>
     </div>
 
     <div class="main-container">
         <div class="sidebar">
-            <div class="sidebar-section">
+            <div class="sidebar-section user-info-section">
                 <h3>사용자 정보</h3>
                 <div class="user-info">
-                    <label for="userName">이름</label>
-                    <input type="text" id="userName" placeholder="사용자 이름을 입력하세요">
+                    <label for="user-name">이름</label>
+                    <input type="text" id="user-name" placeholder="사용자 이름을 입력하세요">
                 </div>
                 <div class="user-info">
-                    <label for="documentName">문서 ID</label>
-                    <input type="text" id="documentName" placeholder="문서 ID" value="demo-doc">
+                    <label for="document-id">문서 ID</label>
+                    <input type="text" id="document-id" placeholder="문서 ID" value="demo-doc">
                 </div>
-                <button class="btn" id="connectBtn" onclick="connectToServer()">
-                    협업 시작
+                <button class="btn" id="connect-btn">
+                    서버 연결
                 </button>
-                <button class="btn" id="stopSyncBtn" onclick="toggleSynchronization()" style="background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%); margin-top: 0.5rem;">
-                    동기화 중지
+                <button class="btn" id="change-document-btn" disabled style="background: linear-gradient(135deg, #ffa502 0%, #ff6348 100%);">
+                    문서 변경
+                </button>
+                <button class="btn" id="disconnect-btn" style="background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%);">
+                    연결 해제
                 </button>
             </div>
 
 
             <div class="sidebar-section">
-                <h3>참여자 (<span id="userCount">0</span>명)</h3>
-                <div class="users-list" id="usersList">
+                <h3>문서 참여자 (<span id="user-count">0</span>명)</h3>
+                <div class="users-list" id="users-list">
                     <div class="loading">
                         <div class="spinner"></div>
                         협업 연결을 기다리는 중...
@@ -592,14 +626,8 @@
 
         <div class="canvas-container">
             <div class="toolbar">
-                <button class="toolbar-btn" onclick="resetZoom()" title="확대/축소 리셋">
-                    🔍
-                </button>
-                <button class="toolbar-btn" onclick="exportDiagram()" title="다이어그램 내보내기">
+                <button class="toolbar-btn" id="export-btn" title="다이어그램 내보내기">
                     💾
-                </button>
-                <button class="toolbar-btn" onclick="showStatistics()" title="통계 보기">
-                    📊
                 </button>
                 <button class="toolbar-btn" onclick="showXmlViewer()" title="XML 뷰어">
                     📝
@@ -701,9 +729,9 @@
                 let xmlResult = null;
                 
                 // 1. 전역 demo 인스턴스에서 modeler 확인
-                if (window.demo && window.demo.modeler) {
-                    xmlResult = await window.demo.modeler.saveXML({ format: true });
-                    currentXmlContent = xmlResult.xml;
+                if (window.demo && window.demo.bpmnModelerService) {
+                    xmlResult = await window.demo.bpmnModelerService.exportDiagramAsXML();
+                    currentXmlContent = xmlResult;
                 }
                 // 2. 전역 modeler 확인
                 else if (window.modeler) {

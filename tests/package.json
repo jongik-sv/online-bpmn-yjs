@@ -12,6 +12,7 @@
     "test:verbose": "node --test --reporter=spec"
   },
   "dependencies": {
+    "online-bpmn-diff": "file:..",
     "ws": "^8.14.2",
     "yjs": "^13.6.8"
   },
@@ -20,7 +21,7 @@
   },
   "keywords": [
     "test",
-    "bpmn", 
+    "bpmn",
     "collaboration",
     "websocket",
     "yjs"

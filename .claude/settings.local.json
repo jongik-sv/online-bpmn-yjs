@@ -3,5 +3,10 @@
     "sequential-thinking",
     "Context7",
     "taskmaster-ai"
-  ]
+  ],
+  "permissions": {
+    "allow": [
+      "Bash(ls:*)"
+    ]
+  }
 }
