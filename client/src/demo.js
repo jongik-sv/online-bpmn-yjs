@@ -1,8 +1,11 @@
 /**
- * Online BPMN Collaboration Demo - 새로운 진입점
- * 리팩토링된 구조를 사용하는 간단한 래퍼
+ * Online BPMN Collaboration Demo - Y.js 직접 바인딩 방식
+ * Y-Quill처럼 간단한 바인딩으로 복잡성 80% 제거
  */
-import { BpmnCollaborationDemo } from './BpmnCollaborationDemo.js';
+import { BpmnCollaborationDemoV2 } from './BpmnCollaborationDemoV2.js';
+
+// 기존 호환성을 위한 export 별칭
+const BpmnCollaborationDemo = BpmnCollaborationDemoV2;
 
 // 전역 변수로 데모 인스턴스 생성
 let demo = null;
@@ -12,26 +15,26 @@ let demo = null;
  */
 async function startApp() {
   try {
-    console.log('🚀 BPMN Collaboration Demo 시작...');
+    // console.log('🚀 BPMN Collaboration Demo 시작...');
     
     // Y.js 라이브러리 로드 확인
-    console.log('📚 라이브러리 로드 상태 확인:');
-    console.log('- window.Y:', window.Y);
-    console.log('- window.WebsocketProvider:', window.WebsocketProvider);
-    console.log('- window.BpmnJS:', window.BpmnJS);
+    // console.log('📚 라이브러리 로드 상태 확인:');
+    // console.log('- window.Y:', window.Y);
+    // console.log('- window.WebsocketProvider:', window.WebsocketProvider);
+    // console.log('- window.BpmnJS:', window.BpmnJS);
     
     if (!window.Y || !window.Y.Doc) {
       throw new Error('Y.js 라이브러리가 로드되지 않았습니다. 페이지를 새로고침 해주세요.');
     }
     
-    // 데모 인스턴스 생성
-    console.log('📦 BpmnCollaborationDemo 인스턴스 생성 중...');
-    demo = new BpmnCollaborationDemo();
-    console.log('✅ demo 인스턴스 생성됨:', demo);
+    // 데모 인스턴스 생성 (V2 - 직접 바인딩)
+    // console.log('📦 BpmnCollaborationDemoV2 인스턴스 생성 중...');
+    demo = new BpmnCollaborationDemoV2();
+    // console.log('✅ demo V2 인스턴스 생성됨 (직접 바인딩):', demo);
     
     // 전역 객체에 등록 (디버깅용)
     window.demo = demo;
-    console.log('🌍 window.demo에 등록됨');
+    // console.log('🌍 window.demo에 등록됨');
     
     // 테스트 함수들 전역 노출
     window.testMove = () => {
@@ -48,7 +51,7 @@ async function startApp() {
         console.log('🧪 서버 테스트 시작...');
         const response = await fetch('http://localhost:3001/health');
         const data = await response.json();
-        console.log('✅ 서버 응답:', data);
+        // console.log('✅ 서버 응답:', data);
         return data;
       } catch (error) {
         console.error('❌ 서버 테스트 실패:', error);
@@ -71,7 +74,7 @@ async function startApp() {
 
     window.clearYjsData = () => {
       if (demo && demo.yjsSyncService) {
-        console.log('🧹 Y.js 데이터 초기화 중...');
+        // console.log('🧹 Y.js 데이터 초기화 중...');
         const yElements = demo.yjsSyncService.getElements();
         const yConnections = demo.yjsSyncService.getConnections();
         
@@ -93,7 +96,7 @@ async function startApp() {
 
     window.reloadDiagram = async () => {
       if (demo && demo.bpmnModelerService) {
-        console.log('🔄 다이어그램 다시 로드 중...');
+        // console.log('🔄 다이어그램 다시 로드 중...');
         await demo.bpmnModelerService.loadInitialDiagram();
         console.log('✅ 다이어그램 다시 로드 완료');
       } else {
@@ -101,8 +104,8 @@ async function startApp() {
       }
     };
     
-    console.log('✅ 애플리케이션 초기화 완료');
-    console.log('💡 사용 가능한 테스트 함수들:');
+    // console.log('✅ 애플리케이션 초기화 완료');
+    // console.log('💡 사용 가능한 테스트 함수들:');
     console.log('  - testMove() : 요소 이동 테스트');
     console.log('  - testServer() : 서버 연결 테스트');
     console.log('  - debugDemo() : 전체 상태 확인');
@@ -126,7 +129,7 @@ function setupUIEventListeners() {
   const connectButton = document.getElementById('connect-btn');
   if (connectButton) {
     connectButton.addEventListener('click', handleConnectClick);
-    console.log('🔌 서버 연결 버튼 이벤트 리스너 등록됨');
+    // console.log('🔌 서버 연결 버튼 이벤트 리스너 등록됨');
   } else {
     console.error('❌ connect-btn 요소를 찾을 수 없음');
   }
@@ -149,15 +152,15 @@ function setupUIEventListeners() {
     exportButton.addEventListener('click', handleExportClick);
   }
 
-  console.log('✅ 모든 UI 이벤트 리스너 설정 완료');
+  // console.log('✅ 모든 UI 이벤트 리스너 설정 완료');
 }
 
 /**
  * 서버 연결 클릭 처리
  */
 async function handleConnectClick() {
-  console.log('🔌 서버 연결 버튼이 클릭되었습니다!');
-  console.log('📝 demo 인스턴스 확인:', demo);
+  // console.log('🔌 서버 연결 버튼이 클릭되었습니다!');
+  // console.log('📝 demo 인스턴스 확인:', demo);
   try {
     if (!demo) {
       console.error('❌ demo 인스턴스가 null입니다');
@@ -379,11 +382,11 @@ function initializeApp() {
   let waited = 0;
   
   const checkLibraries = () => {
-    console.log('📚 라이브러리 로드 확인:', {
-      'window.Y': !!window.Y,
-      'window.WebsocketProvider': !!window.WebsocketProvider,
-      'window.BpmnJS': !!window.BpmnJS
-    });
+    // console.log('📚 라이브러리 로드 확인:', {
+    //   'window.Y': !!window.Y,
+    //   'window.WebsocketProvider': !!window.WebsocketProvider,
+    //   'window.BpmnJS': !!window.BpmnJS
+    // });
     
     if (window.Y && window.WebsocketProvider && window.BpmnJS) {
       startApp();
@@ -406,4 +409,4 @@ if (document.readyState === 'loading') {
 }
 
 // 모듈 export (다른 파일에서 사용할 수 있도록)
-export { demo, BpmnCollaborationDemo };
+export { demo, BpmnCollaborationDemoV2, BpmnCollaborationDemo };

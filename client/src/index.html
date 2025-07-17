@@ -671,7 +671,7 @@
     <script>
         // BPMN 폰트 로딩 확인
         document.fonts.ready.then(() => {
-            console.log('모든 폰트가 로드되었습니다.');
+            // console.log('모든 폰트가 로드되었습니다.');
         });
 
         // Monaco Editor 전역 변수
@@ -696,15 +696,15 @@
 
         // 디버깅: 사용 가능한 BPMN 인스턴스 확인
         function debugBpmnInstances() {
-            console.log('=== BPMN 인스턴스 디버깅 ===');
-            console.log('window.demo:', window.demo);
-            console.log('window.demo.modeler:', window.demo?.modeler);
-            console.log('window.modeler:', window.modeler);
-            console.log('window.bpmnViewer:', window.bpmnViewer);
+            // console.log('=== BPMN 인스턴스 디버깅 ===');
+            // console.log('window.demo:', window.demo);
+            // console.log('window.demo.modeler:', window.demo?.modeler);
+            // console.log('window.modeler:', window.modeler);
+            // console.log('window.bpmnViewer:', window.bpmnViewer);
             
             const canvasElement = document.querySelector('#canvas');
-            console.log('Canvas element:', canvasElement);
-            console.log('Canvas._bpmnjs:', canvasElement?._bpmnjs);
+            // console.log('Canvas element:', canvasElement);
+            // console.log('Canvas._bpmnjs:', canvasElement?._bpmnjs);
             
             // DOM에서 다른 가능한 인스턴스 찾기
             const allElements = document.querySelectorAll('*');
@@ -754,7 +754,7 @@
                     }
                 }
                 
-                console.log('추출된 XML 소스:', xmlResult ? 'BPMN 인스턴스에서 추출' : '기본 템플릿 사용');
+                // console.log('추출된 XML 소스:', xmlResult ? 'BPMN 인스턴스에서 추출' : '기본 템플릿 사용');
 
                 // 모달 표시
                 const modal = document.getElementById('xmlViewerModal');
@@ -783,7 +783,7 @@
                     xmlEditor.setValue(currentXmlContent);
                 }
                 
-                console.log('XML 뷰어가 열렸습니다.');
+                // console.log('XML 뷰어가 열렸습니다.');
                 
             } catch (error) {
                 console.error('XML 뷰어 열기 오류:', error);
@@ -811,7 +811,7 @@
                 URL.revokeObjectURL(url);
                 
                 showNotification('XML 파일이 다운로드되었습니다.', 'success');
-                console.log('XML 파일 다운로드 완료');
+                // console.log('XML 파일 다운로드 완료');
                 
             } catch (error) {
                 console.error('XML 다운로드 오류:', error);
@@ -824,7 +824,7 @@
             try {
                 await navigator.clipboard.writeText(currentXmlContent);
                 showNotification('XML이 클립보드에 복사되었습니다.', 'success');
-                console.log('XML 클립보드 복사 완료');
+                // console.log('XML 클립보드 복사 완료');
                 
             } catch (error) {
                 console.error('클립보드 복사 오류:', error);

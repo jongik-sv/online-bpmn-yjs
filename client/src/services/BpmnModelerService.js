@@ -26,7 +26,7 @@ export class BpmnModelerService {
       
       // 모델러 로드 완료 후 이벤트 확인
       this.modeler.on('import.done', () => {
-        console.log('📋 BPMN 다이어그램 import 완료');
+        // console.log('📋 BPMN 다이어그램 import 완료');
         this.checkMoveCapability();
       });
       
@@ -46,16 +46,16 @@ export class BpmnModelerService {
       const modeling = this.getService('modeling');
       const elementRegistry = this.getService('elementRegistry');
       
-      console.log('🔧 BPMN 서비스 확인:', {
-        move: !!move,
-        modeling: !!modeling,
-        elementRegistry: !!elementRegistry
-      });
+      // console.log('🔧 BPMN 서비스 확인:', {
+      //   move: !!move,
+      //   modeling: !!modeling,
+      //   elementRegistry: !!elementRegistry
+      // });
       
       // 시작 이벤트 요소 확인
       const startEvent = elementRegistry.get('StartEvent_1');
       if (startEvent) {
-        console.log('🎯 시작 이벤트 발견:', startEvent.id, '좌표:', startEvent.x, startEvent.y);
+        // console.log('🎯 시작 이벤트 발견:', startEvent.id, '좌표:', startEvent.x, startEvent.y);
       }
       
     } catch (error) {
@@ -123,7 +123,7 @@ export class BpmnModelerService {
 
     try {
       await this.modeler.importXML(initialDiagram);
-      console.log('✅ 초기 BPMN 다이어그램 로드 완료');
+      // console.log('✅ 초기 BPMN 다이어그램 로드 완료');
     } catch (error) {
       console.error('❌ 초기 다이어그램 로드 실패:', error);
       throw error;
@@ -140,7 +140,7 @@ export class BpmnModelerService {
 
     try {
       await this.modeler.importXML(xml);
-      console.log('✅ 다이어그램 로드 완료');
+      // console.log('✅ 다이어그램 로드 완료');
     } catch (error) {
       console.error('❌ 다이어그램 로드 실패:', error);
       throw error;

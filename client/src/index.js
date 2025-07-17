@@ -15,10 +15,10 @@ window.Y = Y;
 window.WebsocketProvider = WebsocketProvider;
 window.BpmnJS = BpmnJS;
 
-console.log('라이브러리 로딩 상태:');
-console.log('- Y:', typeof Y);
-console.log('- WebsocketProvider:', typeof WebsocketProvider);
-console.log('- BpmnJS:', typeof BpmnJS);
+// console.log('라이브러리 로딩 상태:');
+// console.log('- Y:', typeof Y);
+// console.log('- WebsocketProvider:', typeof WebsocketProvider);
+// console.log('- BpmnJS:', typeof BpmnJS);
 
 // demo.js를 import하여 자동 초기화
 import './demo.js';
@@ -29,4 +29,4 @@ window.resetZoom = () => window.demo?.resetZoom();
 window.exportDiagram = () => window.demo?.exportDiagram();
 window.showStatistics = () => window.demo?.showStatistics();
 
-console.log('BPMN 협업 데모 클라이언트 시작됨');
+// console.log('BPMN 협업 데모 클라이언트 시작됨');

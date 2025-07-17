@@ -147,8 +147,8 @@ export class BpmnCollaborationDemo {
     eventBus.on('commandStack.elements.move.postExecute', this.handleMovePostExecute.bind(this));
     
     // 드래그 이벤트
-    eventBus.on('drag.start', this.handleDragStart.bind(this));
-    eventBus.on('drag.move', this.handleDragMove.bind(this));
+    // eventBus.on('drag.start', this.handleDragStart.bind(this));
+    // eventBus.on('drag.move', this.handleDragMove.bind(this));
     eventBus.on('drag.end', this.handleDragEnd.bind(this));
     
     // 명령 스택 모든 이벤트 감지
@@ -1060,14 +1060,14 @@ export class BpmnCollaborationDemo {
    */
   handleContextPadOpen(event) {
     const elementId = event?.element?.id || 'unknown';
-    console.log('🎯 컨텍스트 패드 열림:', elementId);
+    // console.log('🎯 컨텍스트 패드 열림:', elementId);
   }
 
   /**
    * 컨텍스트 패드 닫기 처리
    */
   handleContextPadClose(event) {
-    console.log('🎯 컨텍스트 패드 닫힘');
+    // console.log('🎯 컨텍스트 패드 닫힘');
   }
 
   /**
