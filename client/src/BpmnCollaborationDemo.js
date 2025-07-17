@@ -27,6 +27,9 @@ export class BpmnCollaborationDemo {
     this.connectedUsers = new Map();
     this.lastSyncedData = new Map(); // 마지막 동기화 데이터 캐시 (중복 방지)
     this.connectionRetryCount = new Map(); // 연결 생성 재시도 카운트
+    this.isApplyingRemoteChange = false; // 원격 변경 적용 중 플래그
+    this.processingDeletion = new Set(); // 삭제 처리 중 요소 추적 (중복 방지)
+    this.isProcessingConnectionEvents = false; // 연결 이벤트 처리 중 플래그 (무한루프 방지)
 
     // 서비스 초기화
     this.bpmnModelerService = new BpmnModelerService();
@@ -128,6 +131,10 @@ export class BpmnCollaborationDemo {
     // 요소 변경 이벤트 (demo-original.js 방식)
     eventBus.on('element.changed', this.handleElementChanged.bind(this));
     eventBus.on('elements.changed', this.handleElementsChanged.bind(this));
+    
+    // 요소 삭제 이벤트 (commandStack 이벤트만 사용)
+    eventBus.on('commandStack.shape.delete.postExecuted', this.handleShapeDeletePost.bind(this));
+    eventBus.on('commandStack.connection.delete.postExecuted', this.handleConnectionDeletePost.bind(this));
     
     // 이동 관련 이벤트
     eventBus.on('elements.move', this.handleBpmnElementsMove.bind(this));
@@ -451,7 +458,18 @@ export class BpmnCollaborationDemo {
    */
   applyConnectionChange(connectionId, connectionData) {
     try {
-      console.log(`🔴 연결선 생성 시작: ${connectionId} (소스: ${connectionData.source}, 타겟: ${connectionData.target})`);
+      console.log(`🔴 원격 연결선 변경 적용: ${connectionId}`, {
+        source: connectionData.source,
+        target: connectionData.target,
+        waypointsCount: connectionData.waypoints?.length || 0,
+        waypoints: connectionData.waypoints
+      });
+      
+      // source나 target이 없는 연결 데이터는 처리하지 않음 (삭제된 요소 관련)
+      if (!connectionData.source || !connectionData.target) {
+        console.log(`⏭️ 연결선 처리 스킵 (source/target 부재): ${connectionId} - 무시함`);
+        return;
+      }
       
       const elementRegistry = this.bpmnModelerService.getService('elementRegistry');
       const modeling = this.bpmnModelerService.getService('modeling');
@@ -459,13 +477,39 @@ export class BpmnCollaborationDemo {
       let connection = elementRegistry.get(connectionId);
       
       if (!connection && connectionData.type) {
+        // 중복 연결 생성 방지 - 같은 source-target 사이에 연결이 이미 있는지 확인
+        const source = elementRegistry.get(connectionData.source);
+        const target = elementRegistry.get(connectionData.target);
+        
+        if (source && target) {
+          // 기존 연결 중에 같은 source-target 사이의 연결이 있는지 확인
+          const existingConnections = elementRegistry.filter(el => 
+            el.type === 'connection' &&
+            el.source?.id === connectionData.source &&
+            el.target?.id === connectionData.target
+          );
+          
+          if (existingConnections.length > 0) {
+            console.log(`⏭️ 같은 방향 연결이 이미 존재함: ${connectionData.source} → ${connectionData.target}, 생성 스킵`);
+            return;
+          }
+        }
+        
         // 새 연결 생성
         this.createConnection(connectionId, connectionData);
         console.log(`✅ 연결선 생성 시도 완료: ${connectionId}`);
       } else if (connection) {
-        // 기존 연결 업데이트 (원격 변경사항)
-        this.updateConnection(connection, connectionData, true);
-        console.log(`🔄 연결선 업데이트 완료: ${connectionId}`);
+        // 기존 연결 업데이트 (원격 변경사항) - waypoint만 업데이트
+        if (connectionData.waypoints && connectionData.waypoints.length > 0) {
+          console.log(`🔍 기존 연결선 waypoints 확인: ${connectionId}`, {
+            currentWaypointsCount: connection.waypoints?.length || 0,
+            newWaypointsCount: connectionData.waypoints?.length || 0
+          });
+          this.updateConnection(connection, connectionData, true);
+          console.log(`🔄 연결선 업데이트 완료: ${connectionId}`);
+        } else {
+          console.log(`⏭️ waypoint 없음, 업데이트 스킵: ${connectionId}`);
+        }
       }
       
     } catch (error) {
@@ -523,10 +567,24 @@ export class BpmnCollaborationDemo {
    * 요소 변경 이벤트 처리 (demo-original.js 방식)
    */
   async handleElementChanged(event) {
-    if (this.isConnected) {
+    if (this.isConnected && !this.isProcessingConnectionEvents) {
       try {
-        console.log(`🔧 요소 변경 감지: ${event.element.id} [타입: ${event.element.type}, 위치: (${event.element.x}, ${event.element.y})]`);
-        this.syncElementToYjs(event.element);
+        const element = event.element;
+        
+        // 연결선 이벤트는 별도 처리 (무한루프 방지)
+        if (element.type && element.type.includes('SequenceFlow')) {
+          console.log(`🔗 연결선 변경 감지: ${element.id} → waypoints 업데이트만 처리`);
+          
+          // waypoints만 업데이트
+          if (element.waypoints && !this.isProcessingConnectionEvents) {
+            console.log(`📍 waypoints 업데이트: ${element.id}`);
+            this.syncConnectionWaypointsToYjs(element);
+          }
+          return;
+        }
+        
+        console.log(`🔧 요소 변경 감지: ${element.id} [타입: ${element.type}, 위치: (${element.x}, ${element.y})]`);
+        this.syncElementToYjs(element);
       } catch (error) {
         console.error('요소 변경 처리 오류:', error);
       }
@@ -537,16 +595,72 @@ export class BpmnCollaborationDemo {
    * 여러 요소 변경 이벤트 처리 (demo-original.js 방식)
    */
   async handleElementsChanged(event) {
-    if (this.isConnected) {
+    if (this.isConnected && !this.isProcessingConnectionEvents) {
       try {
         console.log(`🔧 여러 요소 변경 감지: ${event.elements.length}개 요소`);
         event.elements.forEach(element => {
           console.log(`  - ${element.id} [타입: ${element.type}, 위치: (${element.x}, ${element.y})]`);
-          this.syncElementToYjs(element);
+          
+          // 연결선은 별도 처리 (무한루프 방지)
+          if (element.type && element.type.includes('SequenceFlow')) {
+            if (element.waypoints && !this.isProcessingConnectionEvents) {
+              console.log(`📍 waypoints 업데이트: ${element.id}`);
+              this.syncConnectionWaypointsToYjs(element);
+            }
+          } else {
+            this.syncElementToYjs(element);
+          }
         });
       } catch (error) {
         console.error('요소들 변경 처리 오류:', error);
       }
+    }
+  }
+
+  /**
+   * 연결선 waypoints만 Y.js로 동기화 (무한루프 방지)
+   */
+  syncConnectionWaypointsToYjs(connection) {
+    try {
+      const existingData = this.yjsSyncService.yConnections.get(connection.id);
+      
+      if (!existingData) {
+        console.log(`⏭️ 연결선 waypoints 업데이트 스킵 (연결선 데이터 없음): ${connection.id}`);
+        return;
+      }
+      
+      const newWaypoints = connection.waypoints ? connection.waypoints.map(wp => ({
+        x: wp.x,
+        y: wp.y
+      })) : [];
+      
+      // waypoints만 비교
+      const existingWaypoints = existingData.waypoints || [];
+      let waypointsChanged = false;
+      
+      if (newWaypoints.length !== existingWaypoints.length) {
+        waypointsChanged = true;
+      } else {
+        for (let i = 0; i < newWaypoints.length; i++) {
+          if (Math.abs(newWaypoints[i].x - existingWaypoints[i].x) > 1 || 
+              Math.abs(newWaypoints[i].y - existingWaypoints[i].y) > 1) {
+            waypointsChanged = true;
+            break;
+          }
+        }
+      }
+      
+      if (waypointsChanged) {
+        const updatedData = { ...existingData, waypoints: newWaypoints };
+        
+        this.yjsSyncService.yjsDoc.transact(() => {
+          this.yjsSyncService.yConnections.set(connection.id, updatedData);
+        }, this.clientId);
+        
+        console.log(`📍 연결선 waypoints 동기화 완료: ${connection.id}`);
+      }
+    } catch (error) {
+      console.error('연결선 waypoints 동기화 오류:', error);
     }
   }
 
@@ -583,11 +697,17 @@ export class BpmnCollaborationDemo {
 
       // 기존 데이터와 비교하여 변경사항이 있을 때만 동기화
       if (element.type && element.type.includes('SequenceFlow')) {
+        // source나 target이 없는 연결선은 동기화하지 않음 (삭제된 요소와 연결된 경우)
+        if (!element.source?.id || !element.target?.id) {
+          console.log(`⏭️ 연결선 동기화 스킵 (source/target 부재): ${element.id}`);
+          return;
+        }
+        
         const existingData = this.yjsSyncService.yConnections.get(element.id);
         const newData = {
           type: element.type,
-          source: element.source?.id,
-          target: element.target?.id,
+          source: element.source.id,
+          target: element.target.id,
           businessObject: elementData.businessObject,
           waypoints: element.waypoints ? element.waypoints.map(wp => ({
             x: wp.x,
@@ -744,6 +864,9 @@ export class BpmnCollaborationDemo {
    */
   createConnection(connectionId, connectionData) {
     try {
+      // 연결 이벤트 처리 중 플래그 설정 (무한루프 방지)
+      this.isProcessingConnectionEvents = true;
+      
       const elementRegistry = this.bpmnModelerService.getService('elementRegistry');
       const modeling = this.bpmnModelerService.getService('modeling');
       
@@ -766,57 +889,40 @@ export class BpmnCollaborationDemo {
           targetFound: !!target
         });
         
-        // 재시도 로직
+        // 재시도 로직 (한 번만)
         const retryCount = this.connectionRetryCount.get(connectionId) || 0;
-        const maxRetries = 10;
         
-        if (retryCount < maxRetries) {
-          console.log(`🔄 연결 생성 재시도 ${retryCount + 1}/${maxRetries}: ${connectionId}`);
-          this.connectionRetryCount.set(connectionId, retryCount + 1);
+        if (retryCount === 0) {
+          console.log(`🔄 연결 생성 재시도: ${connectionId} (0.5초 후)`);
+          this.connectionRetryCount.set(connectionId, 1);
           
           setTimeout(() => {
             this.createConnection(connectionId, connectionData);
-          }, 100);
+          }, 500);
         } else {
-          console.error('❌ 연결 생성 최대 재시도 초과:', connectionId);
+          console.log(`❌ 연결 생성 포기: ${connectionId} (요소 부재)`);
           this.connectionRetryCount.delete(connectionId);
-          this.yjsSyncService.yConnections.delete(connectionId);
         }
         
         return null;
       }
       
-      console.log(`🔗 연결선 생성 시작: ${connectionId} (${source.id} → ${target.id})`);
+      console.log(`🔗 연결 생성 시작: ${connectionId} [${source.id} → ${target.id}]`);
       
-      // elementFactory와 modeling.createConnection을 사용하여 ID를 명시적으로 제어
-      const bpmnFactory = this.bpmnModelerService.getService('bpmnFactory');
-      const elementFactory = this.bpmnModelerService.getService('elementFactory');
-
-      // BusinessObject 생성 (ID 명시)
-      const businessObject = bpmnFactory.create(connectionData.type || 'bpmn:SequenceFlow', {
-        id: connectionId, // 요청된 ID를 여기에 명시
-        sourceRef: source.businessObject,
-        targetRef: target.businessObject,
-        ...(connectionData.businessObject || {}) // 기타 businessObject 속성 병합
+      // 간단한 연결 생성 (BPMN.js가 내부적으로 안전하게 처리)
+      const connection = modeling.connect(source, target, {
+        type: connectionData.type || 'bpmn:SequenceFlow'
       });
-
-      // Connection Element 생성 (ID 명시)
-      const newConnectionElement = elementFactory.create('connection', {
-        id: connectionId, // 요청된 ID를 여기에 명시
-        type: connectionData.type || 'bpmn:SequenceFlow',
-        businessObject: businessObject,
-        source: source,
-        target: target,
-        waypoints: connectionData.waypoints || [] // 웨이포인트 포함
-      });
-
-      // modeling.createConnection을 사용하여 다이어그램에 추가
-      const connection = modeling.createConnection(
-        source,
-        target,
-        newConnectionElement,
-        source.parent // 연결선이 속할 부모 요소
-      );
+      
+      // waypoints가 있으면 별도로 업데이트
+      if (connection && connectionData.waypoints && connectionData.waypoints.length > 0) {
+        try {
+          modeling.updateWaypoints(connection, connectionData.waypoints);
+          console.log(`📍 waypoints 업데이트: ${connection.id}`);
+        } catch (waypointError) {
+          console.warn('waypoint 업데이트 실패:', waypointError);
+        }
+      }
       
       if (connection) {
         console.log('🎯 연결 성공:', {
@@ -837,6 +943,12 @@ export class BpmnCollaborationDemo {
     } catch (error) {
       console.error('❌ 연결 생성 오류:', error);
       return null;
+    } finally {
+      // 플래그 해제
+      setTimeout(() => {
+        this.isProcessingConnectionEvents = false;
+        console.log('🔓 연결 이벤트 처리 플래그 해제됨');
+      }, 100);
     }
   }
 
@@ -845,12 +957,22 @@ export class BpmnCollaborationDemo {
    */
   updateConnection(connection, connectionData, isRemote = false) {
     try {
+      // 연결 이벤트 처리 중 플래그 설정 (무한루프 방지)
+      this.isProcessingConnectionEvents = true;
+      
       const modeling = this.bpmnModelerService.getService('modeling');
       
-      // waypoint 업데이트 - 원격 변경 시에만 적용하지 않음 (로컬은 이미 적용됨)
-      if (connectionData.waypoints && connectionData.waypoints.length > 0 && !isRemote) {
+      // waypoint 업데이트
+      if (connectionData.waypoints && connectionData.waypoints.length > 0) {
         const currentWaypoints = connection.waypoints || [];
         const newWaypoints = connectionData.waypoints;
+        
+        console.log(`🔍 waypoint 비교 시작: ${connection.id} [원격: ${isRemote}]`, {
+          currentCount: currentWaypoints.length,
+          newCount: newWaypoints.length,
+          current: currentWaypoints,
+          new: newWaypoints
+        });
         
         // waypoint 비교 (좌표가 다를 때만 업데이트)
         const waypointsChanged = !this.isDataEqual(currentWaypoints, newWaypoints);
@@ -858,15 +980,23 @@ export class BpmnCollaborationDemo {
         if (waypointsChanged) {
           try {
             modeling.updateWaypoints(connection, newWaypoints);
-            console.log(`연결선 waypoint 업데이트 적용됨: ${connection.id}`);
+            console.log(`✅ 연결선 waypoint 업데이트 적용됨: ${connection.id} [원격: ${isRemote}]`);
           } catch (waypointError) {
-            console.error('Waypoint 업데이트 실패:', waypointError);
+            console.error('❌ Waypoint 업데이트 실패:', waypointError);
           }
+        } else {
+          console.log(`➡️ waypoint 동일함, 업데이트 스킵: ${connection.id}`);
         }
       }
       
     } catch (error) {
       console.error('연결 업데이트 오류:', error);
+    } finally {
+      // 플래그 해제
+      setTimeout(() => {
+        this.isProcessingConnectionEvents = false;
+        console.log('🔓 연결 업데이트 이벤트 처리 플래그 해제됨');
+      }, 100);
     }
   }
 
@@ -1276,6 +1406,137 @@ export class BpmnCollaborationDemo {
     this.updateConnectionStatus();
     this.updateUsersList();
     console.log('🔌 연결 해제됨');
+  }
+
+
+  /**
+   * Shape 삭제 명령 완료 후 처리
+   */
+  handleShapeDeletePost(event) {
+    if (!this.isConnected || !event.context?.shape || this.isApplyingRemoteChange) {
+      return;
+    }
+
+    const elementId = event.context.shape.id;
+    
+    // 중복 처리 방지 - 더 확실하게
+    if (this.processingDeletion.has(elementId)) {
+      console.log(`⏭️ 이미 삭제 처리 중: ${elementId}`);
+      return;
+    }
+    
+    console.log(`🗑️ Shape 삭제 명령 완료: ${elementId}`);
+    this.processingDeletion.add(elementId);
+    
+    // 즉시 Y.js에 삭제 알림 (setTimeout 없이)
+    try {
+      this.yjsSyncService.yjsDoc.transact(() => {
+        this.yjsSyncService.yElements.delete(elementId);
+      }, this.clientId);
+      console.log(`📤 Y.js 요소 삭제 완료: ${elementId}`);
+    } catch (error) {
+      console.error('Y.js 요소 삭제 오류:', error);
+    }
+    
+    // 1초 후 삭제 플래그 해제
+    setTimeout(() => {
+      this.processingDeletion.delete(elementId);
+    }, 1000);
+  }
+
+  /**
+   * Connection 삭제 명령 완료 후 처리
+   */
+  handleConnectionDeletePost(event) {
+    if (!this.isConnected || !event.context?.connection || this.isApplyingRemoteChange) {
+      return;
+    }
+
+    const connectionId = event.context.connection.id;
+    
+    // 중복 처리 방지 - 더 확실하게
+    if (this.processingDeletion.has(connectionId)) {
+      console.log(`⏭️ 이미 삭제 처리 중: ${connectionId}`);
+      return;
+    }
+    
+    console.log(`🗑️ Connection 삭제 명령 완료: ${connectionId}`);
+    this.processingDeletion.add(connectionId);
+    
+    // 즉시 Y.js에 삭제 알림 (setTimeout 없이)
+    try {
+      this.yjsSyncService.yjsDoc.transact(() => {
+        this.yjsSyncService.yConnections.delete(connectionId);
+      }, this.clientId);
+      console.log(`📤 Y.js 연결 삭제 완료: ${connectionId}`);
+    } catch (error) {
+      console.error('Y.js 연결 삭제 오류:', error);
+    }
+    
+    // 1초 후 삭제 플래그 해제
+    setTimeout(() => {
+      this.processingDeletion.delete(connectionId);
+    }, 1000);
+  }
+
+
+
+  /**
+   * 원격 요소 제거 처리 (Y.js에서 호출)
+   */
+  removeElement(elementId) {
+    try {
+      const elementRegistry = this.bpmnModelerService.getService('elementRegistry');
+      const modeling = this.bpmnModelerService.getService('modeling');
+      
+      const element = elementRegistry.get(elementId);
+      if (element) {
+        console.log(`🗑️ 원격 요소 제거: ${elementId}`);
+        
+        // 원격 변경 플래그 설정 (재귀 이벤트 방지)
+        this.isApplyingRemoteChange = true;
+        
+        modeling.removeElements([element]);
+        console.log('✅ 요소 제거됨:', elementId);
+        
+        // 플래그 해제 (다음 tick에서)
+        setTimeout(() => {
+          this.isApplyingRemoteChange = false;
+        }, 0);
+      }
+    } catch (error) {
+      console.error('요소 제거 오류:', error);
+      this.isApplyingRemoteChange = false;
+    }
+  }
+
+  /**
+   * 원격 연결 제거 처리 (Y.js에서 호출)
+   */
+  removeConnection(connectionId) {
+    try {
+      const elementRegistry = this.bpmnModelerService.getService('elementRegistry');
+      const modeling = this.bpmnModelerService.getService('modeling');
+      
+      const connection = elementRegistry.get(connectionId);
+      if (connection) {
+        console.log(`🗑️ 원격 연결 제거: ${connectionId}`);
+        
+        // 원격 변경 플래그 설정 (재귀 이벤트 방지)
+        this.isApplyingRemoteChange = true;
+        
+        modeling.removeElements([connection]);
+        console.log('✅ 연결 제거됨:', connectionId);
+        
+        // 플래그 해제 (다음 tick에서)
+        setTimeout(() => {
+          this.isApplyingRemoteChange = false;
+        }, 0);
+      }
+    } catch (error) {
+      console.error('연결 제거 오류:', error);
+      this.isApplyingRemoteChange = false;
+    }
   }
 
   /**

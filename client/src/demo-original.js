@@ -437,11 +437,11 @@ export class BpmnCollaborationDemo {
         if (!sourceElement || !targetElement) {
           console.log(`⚠️ Y.js 연결 처리 스킵 - 요소 부재: ${key} (소스: ${!!sourceElement}, 타겟: ${!!targetElement})`);
           
-          // 100ms 후 재시도 (요소가 아직 생성되지 않았을 수 있음)
+          // 0.5초 후 한 번만 재시도 (요소가 아직 생성되지 않았을 수 있음)
           setTimeout(() => {
-            console.log(`🔄 연결 재시도: ${key}`);
+            console.log(`🔄 연결 재시도: ${key} (마지막 시도)`);
             this.applyConnectionChange(key, connectionData);
-          }, 100);
+          }, 500);
           return;
         }
 
@@ -456,10 +456,10 @@ export class BpmnCollaborationDemo {
         
         if (connection && this.isConnectedElementMoving(connection)) {
           console.log('연결된 요소 이동 중으로 연결선 업데이트 지연:', key);
-          // 300ms 후에 재시도
+          // 0.5초 후에 한 번만 재시도
           setTimeout(() => {
             this.applyConnectionChange(key, connectionData);
-          }, 300);
+          }, 500);
           return;
         }
 
@@ -922,19 +922,18 @@ createConnection(connectionId, connectionData) {
         targetFound: !!target
       });
       
-      // 재시도 로직
+      // 재시도 로직 (한 번만)
       const retryCount = this.connectionRetryCount.get(connectionId) || 0;
-      const maxRetries = 10;
       
-      if (retryCount < maxRetries) {
-        console.log(`🔄 연결 생성 재시도 ${retryCount + 1}/${maxRetries}: ${connectionId}`);
-        this.connectionRetryCount.set(connectionId, retryCount + 1);
+      if (retryCount === 0) {
+        console.log(`🔄 연결 생성 재시도: ${connectionId} (0.5초 후)`);
+        this.connectionRetryCount.set(connectionId, 1);
         
         setTimeout(() => {
           this.createConnection(connectionId, connectionData);
-        }, 100);
+        }, 500);
       } else {
-        console.error('❌ 연결 생성 최대 재시도 초과:', connectionId);
+        console.log(`❌ 연결 생성 포기: ${connectionId} (요소 부재)`);
         this.connectionRetryCount.delete(connectionId);
         this.yConnections.delete(connectionId);
         this.addLog(`연결 생성 실패로 Y.js 데이터 정리: ${connectionId}`, 'error');

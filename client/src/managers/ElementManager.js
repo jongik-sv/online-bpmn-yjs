@@ -148,16 +148,18 @@ export class ElementManager {
           targetFound: !!target
         });
 
-        // 재시도 로직
+        // 재시도 로직 (한 번만)
         const retryCount = this.connectionRetryCount.get(connectionId) || 0;
-        if (retryCount < 3) {
-          this.connectionRetryCount.set(connectionId, retryCount + 1);
+        
+        if (retryCount === 0) {
+          console.log(`🔄 연결 생성 재시도: ${connectionId} (0.5초 후)`);
+          this.connectionRetryCount.set(connectionId, 1);
+          
           setTimeout(() => {
-            console.log(`🔄 연결 생성 재시도 ${retryCount + 1}/3: ${connectionId}`);
             this.createConnection(connectionId, connectionData);
-          }, 1000 * (retryCount + 1));
+          }, 500);
         } else {
-          console.error(`❌ 연결 생성 최대 재시도 초과: ${connectionId}`);
+          console.log(`❌ 연결 생성 포기: ${connectionId} (요소 부재)`);
           this.connectionRetryCount.delete(connectionId);
         }
         return null;
