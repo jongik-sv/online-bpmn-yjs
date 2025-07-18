@@ -729,9 +729,9 @@
                 let xmlResult = null;
                 
                 // 1. 전역 demo 인스턴스에서 modeler 확인
-                if (window.demo && window.demo.bpmnModelerService) {
-                    xmlResult = await window.demo.bpmnModelerService.exportDiagramAsXML();
-                    currentXmlContent = xmlResult;
+                if (window.demo && window.demo.modeler) {
+                    xmlResult = await window.demo.modeler.saveXML({ format: true });
+                    currentXmlContent = xmlResult.xml;
                 }
                 // 2. 전역 modeler 확인
                 else if (window.modeler) {

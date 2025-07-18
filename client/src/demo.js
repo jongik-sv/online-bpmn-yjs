@@ -1,11 +1,12 @@
 /**
- * Online BPMN Collaboration Demo - Y.js 직접 바인딩 방식
- * Y-Quill처럼 간단한 바인딩으로 복잡성 80% 제거
+ * Online BPMN Collaboration Demo - Silent Update Architecture
+ * 새로운 Silent Update 아키텍처를 사용한 완전한 협업 시스템
  */
+import { BpmnCollaborationDemoV3 } from './BpmnCollaborationDemoV3.js';
 import { BpmnCollaborationDemoV2 } from './BpmnCollaborationDemoV2.js';
 
-// 기존 호환성을 위한 export 별칭
-const BpmnCollaborationDemo = BpmnCollaborationDemoV2;
+// 새로운 V3 시스템 사용 (Silent Update Architecture)
+const BpmnCollaborationDemo = BpmnCollaborationDemoV3;
 
 // 전역 변수로 데모 인스턴스 생성
 let demo = null;
@@ -27,10 +28,10 @@ async function startApp() {
       throw new Error('Y.js 라이브러리가 로드되지 않았습니다. 페이지를 새로고침 해주세요.');
     }
     
-    // 데모 인스턴스 생성 (V2 - 직접 바인딩)
-    // console.log('📦 BpmnCollaborationDemoV2 인스턴스 생성 중...');
-    demo = new BpmnCollaborationDemoV2();
-    // console.log('✅ demo V2 인스턴스 생성됨 (직접 바인딩):', demo);
+    // 데모 인스턴스 생성 (V3 - Silent Update Architecture)
+    // console.log('📦 BpmnCollaborationDemoV3 인스턴스 생성 중...');
+    demo = new BpmnCollaborationDemoV3();
+    // console.log('✅ demo V3 인스턴스 생성됨 (Silent Update Architecture):', demo);
     
     // 전역 객체에 등록 (디버깅용)
     window.demo = demo;
@@ -38,11 +39,38 @@ async function startApp() {
     
     // 테스트 함수들 전역 노출
     window.testMove = () => {
-      if (demo && demo.bpmnModelerService) {
-        return demo.bpmnModelerService.testElementMove();
+      if (demo && demo.testElementMove) {
+        return demo.testElementMove();
       } else {
-        console.error('BPMN 모델러 서비스가 초기화되지 않았습니다.');
+        console.error('BPMN 모델러가 초기화되지 않았습니다.');
         return false;
+      }
+    };
+
+    window.testSilentUpdate = () => {
+      if (demo && demo.testSilentUpdate) {
+        return demo.testSilentUpdate();
+      } else {
+        console.error('Silent Update 서비스가 초기화되지 않았습니다.');
+        return false;
+      }
+    };
+
+    window.getSyncStatus = () => {
+      if (demo && demo.getSyncStatus) {
+        return demo.getSyncStatus();
+      } else {
+        console.error('동기화 매니저가 초기화되지 않았습니다.');
+        return null;
+      }
+    };
+
+    window.getConnectionStatus = () => {
+      if (demo && demo.getConnectionStatus) {
+        return demo.getConnectionStatus();
+      } else {
+        console.error('협업 시스템이 초기화되지 않았습니다.');
+        return null;
       }
     };
     
@@ -60,64 +88,80 @@ async function startApp() {
     };
     
     window.debugDemo = () => {
-      console.log('🔍 Demo 디버그 정보:');
-      console.log('- demo:', !!demo);
-      console.log('- isConnected:', demo?.isConnected);
-      console.log('- documentId:', demo?.documentId);
-      console.log('- userName:', demo?.userName);
-      console.log('- clientId:', demo?.clientId);
-      console.log('- bpmnModelerService:', !!demo?.bpmnModelerService);
-      console.log('- yjsSyncService:', !!demo?.yjsSyncService);
-      console.log('- webSocketService:', !!demo?.webSocketService);
-      return demo;
-    };
-
-    window.clearYjsData = () => {
-      if (demo && demo.yjsSyncService) {
-        // console.log('🧹 Y.js 데이터 초기화 중...');
-        const yElements = demo.yjsSyncService.getElements();
-        const yConnections = demo.yjsSyncService.getConnections();
-        
-        console.log('삭제 전 데이터:');
-        console.log('- Elements:', yElements.size);
-        console.log('- Connections:', yConnections.size);
-        
-        yElements.clear();
-        yConnections.clear();
-        
-        console.log('✅ Y.js 데이터 초기화 완료');
-        console.log('삭제 후 데이터:');
-        console.log('- Elements:', yElements.size);
-        console.log('- Connections:', yConnections.size);
+      console.log('🔍 Demo V3 디버그 정보:');
+      if (demo && demo.getDebugInfo) {
+        const debugInfo = demo.getDebugInfo();
+        console.table(debugInfo);
+        return debugInfo;
       } else {
-        console.error('Demo 또는 YjsSyncService가 초기화되지 않았습니다.');
+        console.log('- demo:', !!demo);
+        console.log('- isConnected:', demo?.isConnected);
+        console.log('- currentDocumentId:', demo?.currentDocumentId);
+        return demo;
       }
     };
 
     window.reloadDiagram = async () => {
-      if (demo && demo.bpmnModelerService) {
-        // console.log('🔄 다이어그램 다시 로드 중...');
-        await demo.bpmnModelerService.loadInitialDiagram();
+      if (demo && demo.loadInitialDiagram) {
+        console.log('🔄 다이어그램 다시 로드 중...');
+        await demo.loadInitialDiagram();
         console.log('✅ 다이어그램 다시 로드 완료');
       } else {
-        console.error('Demo 또는 BpmnModelerService가 초기화되지 않았습니다.');
+        console.error('Demo가 초기화되지 않았습니다.');
+      }
+    };
+
+    window.validateSync = () => {
+      if (demo && demo.syncManager) {
+        console.log('🔍 동기화 상태 검증 중...');
+        const inconsistencies = demo.syncManager.validateSync();
+        console.log('검증 결과:', inconsistencies);
+        return inconsistencies;
+      } else {
+        console.error('Sync Manager가 초기화되지 않았습니다.');
+        return null;
       }
     };
     
     // console.log('✅ 애플리케이션 초기화 완료');
     // console.log('💡 사용 가능한 테스트 함수들:');
     console.log('  - testMove() : 요소 이동 테스트');
+    console.log('  - testSilentUpdate() : Silent Update 테스트');
     console.log('  - testServer() : 서버 연결 테스트');
     console.log('  - debugDemo() : 전체 상태 확인');
-    console.log('  - clearYjsData() : Y.js 데이터 초기화');
+    console.log('  - getSyncStatus() : 동기화 상태 확인');
+    console.log('  - getConnectionStatus() : 연결 상태 확인');
     console.log('  - reloadDiagram() : 다이어그램 다시 로드');
+    console.log('  - validateSync() : 동기화 검증');
     
     // UI 이벤트 리스너 설정
     setupUIEventListeners();
     
+    // 기본 사용자 이름 설정
+    setupDefaultUserName();
+    
   } catch (error) {
     console.error('❌ 애플리케이션 시작 실패:', error);
     showError('애플리케이션 시작에 실패했습니다: ' + error.message);
+  }
+}
+
+/**
+ * 기본 사용자 이름 설정
+ */
+function setupDefaultUserName() {
+  const userNameInput = document.getElementById('user-name');
+  if (userNameInput && !userNameInput.value.trim()) {
+    // 랜덤 사용자 이름 생성
+    const randomNames = [
+      '김개발', '박협업', '이모델러', '정다이어그램', '최프로세스',
+      '한업무', '조설계', '윤분석', '장시스템', '임기획'
+    ];
+    const randomName = randomNames[Math.floor(Math.random() * randomNames.length)];
+    const randomNumber = Math.floor(Math.random() * 100) + 1;
+    
+    userNameInput.value = `${randomName}${randomNumber}`;
+    userNameInput.placeholder = '사용자 이름을 입력하세요';
   }
 }
 
@@ -191,6 +235,11 @@ async function handleConnectClick() {
     if (changeDocumentButton) {
       changeDocumentButton.disabled = false;
     }
+
+    // UI 상태 업데이트
+    updateConnectionStatus(true);
+    updateDocumentInfo(documentId);
+    updateClientInfo(demo.options.userId, demo.options.userName);
 
     showSuccess(`서버에 연결되고 문서 "${documentId}"에 참가했습니다.`);
 
@@ -279,6 +328,17 @@ function handleDisconnectClick() {
     // UI 버튼 상태 초기화
     resetButtonStates();
     
+    // UI 상태 초기화
+    updateConnectionStatus(false);
+    updateDocumentInfo('');
+    updateClientInfo('', '');
+    
+    // 사용자 목록 초기화
+    const usersList = document.getElementById('users-list');
+    if (usersList) {
+      usersList.innerHTML = '<div class="loading"><div class="spinner"></div>협업 연결을 기다리는 중...</div>';
+    }
+    
     showSuccess('연결이 해제되었습니다.');
 
   } catch (error) {
@@ -292,11 +352,11 @@ function handleDisconnectClick() {
  */
 async function handleExportClick() {
   try {
-    if (!demo || !demo.bpmnModelerService) {
+    if (!demo || !demo.modeler) {
       throw new Error('BPMN 모델러가 초기화되지 않았습니다.');
     }
 
-    const xml = await demo.bpmnModelerService.exportDiagramAsXML();
+    const xml = await demo.exportDiagramAsXML();
     
     // XML을 새 창에서 표시
     const newWindow = window.open();
@@ -364,6 +424,44 @@ function escapeHtml(text) {
 }
 
 /**
+ * 연결 상태 UI 업데이트
+ */
+function updateConnectionStatus(isConnected) {
+  const statusDot = document.getElementById('connection-status');
+  const statusText = document.getElementById('connection-text');
+  
+  if (statusDot && statusText) {
+    if (isConnected) {
+      statusDot.classList.add('connected');
+      statusText.textContent = '연결됨';
+    } else {
+      statusDot.classList.remove('connected');
+      statusText.textContent = '연결 안됨';
+    }
+  }
+}
+
+/**
+ * 문서 정보 UI 업데이트
+ */
+function updateDocumentInfo(documentId) {
+  const documentNameElement = document.getElementById('document-name');
+  if (documentNameElement) {
+    documentNameElement.textContent = documentId || '-';
+  }
+}
+
+/**
+ * 클라이언트 정보 UI 업데이트
+ */
+function updateClientInfo(userId, userName) {
+  const clientIdElement = document.getElementById('client-id');
+  if (clientIdElement) {
+    clientIdElement.textContent = userName ? `${userName} (${userId?.slice(-8)})` : '-';
+  }
+}
+
+/**
  * 페이지 언로드 시 정리
  */
 window.addEventListener('beforeunload', () => {
@@ -409,4 +507,4 @@ if (document.readyState === 'loading') {
 }
 
 // 모듈 export (다른 파일에서 사용할 수 있도록)
-export { demo, BpmnCollaborationDemoV2, BpmnCollaborationDemo };
+export { demo, BpmnCollaborationDemoV3, BpmnCollaborationDemoV2, BpmnCollaborationDemo };

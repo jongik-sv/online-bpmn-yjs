@@ -319,19 +319,38 @@ class BpmnCollaborationServer {
       server: this.server
     });
 
-    this.wss.on('connection', (ws, req) => {
+    this.wss.on('connection', async (ws, req) => {
       try {
-        // Y.js의 내장 WebSocket 처리 사용 (참고: online-bpmn-design 프로젝트)
-        setupWSConnection(ws, req, {
-          gc: true
-        });
-        
-        // 연결 로깅
         const url = new URL(req.url, 'http://localhost');
         const pathname = url.pathname;
-        const documentId = pathname.replace('/collaboration/', '') || 'default';
         
-        this.logger.info(`New WebSocket connection for document: ${documentId}`);
+        // Y.js 연결과 일반 협업 연결 구분
+        if (pathname.startsWith('/collaboration/')) {
+          // Y.js의 내장 WebSocket 처리 사용 (기존 방식)
+          const documentId = pathname.replace('/collaboration/', '') || 'default';
+          
+          // DocumentManager에서 Y.js 문서 가져오기 또는 생성
+          let yjsDoc = this.documentManager.getYjsDocument(documentId);
+          if (!yjsDoc) {
+            // 문서가 없으면 새로 생성
+            const docInfo = await this.documentManager.createDocument(`Document ${documentId}`);
+            yjsDoc = this.documentManager.getYjsDocument(docInfo.id);
+            this.logger.info(`Created new document for Y.js: ${documentId}`);
+          }
+          
+          // Y.js 연결 설정 (DocumentManager의 문서 사용)
+          setupWSConnection(ws, req, {
+            gc: true,
+            docName: documentId,
+            getYDoc: () => yjsDoc
+          });
+          
+          this.logger.info(`New Y.js WebSocket connection for document: ${documentId}`);
+          
+        } else {
+          // 새로운 Silent Update 협업 연결 처리
+          this._handleCollaborationConnection(ws, req);
+        }
         
       } catch (error) {
         this.logger.error('Connection handling error:', error.message);
@@ -339,7 +358,270 @@ class BpmnCollaborationServer {
       }
     });
 
-    this.logger.info('WebSocket server initialized on /collaboration');
+    this.logger.info('WebSocket server initialized - Y.js on /collaboration, Collaboration on /');
+  }
+
+  /**
+   * 새로운 협업 연결 처리
+   * @private
+   */
+  _handleCollaborationConnection(ws, req) {
+    // 연결 메타데이터
+    ws.userId = null;
+    ws.documentId = null;
+    ws.userInfo = null;
+    ws.isAlive = true;
+
+    // 하트비트 설정
+    ws.on('pong', () => {
+      ws.isAlive = true;
+    });
+
+    // 메시지 처리
+    ws.on('message', (data) => {
+      try {
+        const message = JSON.parse(data.toString());
+        this._handleWebSocketMessage(ws, message);
+      } catch (error) {
+        this.logger.error('Invalid WebSocket message:', error.message);
+        ws.send(JSON.stringify({
+          type: 'error',
+          error: 'Invalid message format'
+        }));
+      }
+    });
+
+    // 연결 해제 처리
+    ws.on('close', () => {
+      this._handleWebSocketDisconnection(ws);
+    });
+
+    // 오류 처리
+    ws.on('error', (error) => {
+      this.logger.error('WebSocket error:', error.message);
+    });
+
+    this.logger.info('New collaboration WebSocket connection established');
+  }
+
+  /**
+   * WebSocket 메시지 처리
+   * @private
+   */
+  _handleWebSocketMessage(ws, message) {
+    try {
+      switch (message.type) {
+        case 'user_join':
+          this._handleUserJoin(ws, message);
+          break;
+        case 'user_leave':
+          this._handleUserLeave(ws, message);
+          break;
+        case 'model_change':
+          this._handleModelChange(ws, message);
+          break;
+        case 'batch_update':
+          this._handleBatchUpdate(ws, message);
+          break;
+        case 'cursor_position':
+          this._handleCursorPosition(ws, message);
+          break;
+        case 'cursor_hidden':
+          this._handleCursorHidden(ws, message);
+          break;
+        case 'user_selection':
+          this._handleUserSelection(ws, message);
+          break;
+        case 'heartbeat':
+          this._handleHeartbeat(ws, message);
+          break;
+        case 'heartbeat_response':
+          // 하트비트 응답은 로깅만
+          break;
+        case 'sync_request':
+          this._handleSyncRequest(ws, message);
+          break;
+        case 'sync_response':
+          this._handleSyncResponse(ws, message);
+          break;
+        default:
+          this.logger.warn('Unknown message type:', message.type);
+      }
+    } catch (error) {
+      this.logger.error('Error handling WebSocket message:', error);
+      ws.send(JSON.stringify({
+        type: 'error',
+        error: 'Message processing failed'
+      }));
+    }
+  }
+
+  /**
+   * 사용자 참가 처리
+   * @private
+   */
+  _handleUserJoin(ws, message) {
+    ws.userId = message.user.id;
+    ws.userInfo = message.user;
+    
+    // 현재 연결된 모든 사용자 목록 수집
+    const connectedUsers = [];
+    this.wss.clients.forEach(client => {
+      if (client.userInfo && client.readyState === 1) { // OPEN state
+        connectedUsers.push(client.userInfo);
+      }
+    });
+
+    // 새 사용자에게 현재 사용자 목록 전송
+    ws.send(JSON.stringify({
+      type: 'users_list',
+      users: connectedUsers,
+      timestamp: Date.now()
+    }));
+    
+    // 다른 클라이언트들에게 사용자 참가 알림
+    this._broadcast(ws, {
+      type: 'user_joined',
+      user: message.user,
+      timestamp: Date.now()
+    });
+
+    // 참가 확인 응답
+    ws.send(JSON.stringify({
+      type: 'user_join_confirmed',
+      userId: message.user.id,
+      timestamp: Date.now()
+    }));
+
+    this.logger.info(`User joined: ${message.user.name} (${message.user.id}), total users: ${connectedUsers.length}`);
+  }
+
+  /**
+   * 사용자 퇴장 처리
+   * @private
+   */
+  _handleUserLeave(ws, message) {
+    this._broadcast(ws, {
+      type: 'user_left',
+      userId: message.userId,
+      timestamp: Date.now()
+    });
+
+    this.logger.info(`User left: ${message.userId}`);
+  }
+
+  /**
+   * 모델 변경 처리
+   * @private
+   */
+  _handleModelChange(ws, message) {
+    // 다른 클라이언트들에게 변경사항 브로드캐스트
+    this._broadcast(ws, message);
+    
+    this.logger.debug(`Model change from ${message.userId}:`, message.operation?.type);
+  }
+
+  /**
+   * 배치 업데이트 처리
+   * @private
+   */
+  _handleBatchUpdate(ws, message) {
+    // 배치 업데이트를 개별 업데이트로 분해하여 브로드캐스트
+    message.updates.forEach(update => {
+      this._broadcast(ws, update);
+    });
+
+    this.logger.debug(`Batch update from ${message.userId}: ${message.updates.length} updates`);
+  }
+
+  /**
+   * 커서 위치 처리
+   * @private
+   */
+  _handleCursorPosition(ws, message) {
+    this._broadcast(ws, message);
+  }
+
+  /**
+   * 커서 숨김 처리
+   * @private
+   */
+  _handleCursorHidden(ws, message) {
+    this._broadcast(ws, message);
+  }
+
+  /**
+   * 사용자 선택 처리
+   * @private
+   */
+  _handleUserSelection(ws, message) {
+    this._broadcast(ws, message);
+  }
+
+  /**
+   * 하트비트 처리
+   * @private
+   */
+  _handleHeartbeat(ws, message) {
+    ws.send(JSON.stringify({
+      type: 'heartbeat',
+      timestamp: Date.now()
+    }));
+  }
+
+  /**
+   * 동기화 요청 처리
+   * @private
+   */
+  _handleSyncRequest(ws, message) {
+    // 다른 클라이언트들에게 동기화 요청 전달
+    this._broadcast(ws, message);
+  }
+
+  /**
+   * 동기화 응답 처리
+   * @private
+   */
+  _handleSyncResponse(ws, message) {
+    // 동기화 요청자에게 응답 전달 (구현 필요시)
+    this.logger.debug('Sync response received from:', message.userId);
+  }
+
+  /**
+   * WebSocket 연결 해제 처리
+   * @private
+   */
+  _handleWebSocketDisconnection(ws) {
+    if (ws.userId) {
+      // 다른 클라이언트들에게 사용자 퇴장 알림
+      this._broadcast(ws, {
+        type: 'user_left',
+        userId: ws.userId,
+        timestamp: Date.now()
+      });
+
+      this.logger.info(`User disconnected: ${ws.userId}`);
+    }
+  }
+
+  /**
+   * 메시지 브로드캐스트 (발신자 제외)
+   * @private
+   */
+  _broadcast(sender, message) {
+    if (!this.wss) return;
+
+    const messageStr = JSON.stringify(message);
+    
+    this.wss.clients.forEach(client => {
+      if (client !== sender && client.readyState === client.OPEN) {
+        try {
+          client.send(messageStr);
+        } catch (error) {
+          this.logger.error('Error broadcasting message:', error.message);
+        }
+      }
+    });
   }
 
   /**

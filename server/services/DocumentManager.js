@@ -3,7 +3,7 @@
  * BPMN 문서의 생명주기와 저장소 관리
  */
 
-// Y.js import 제거 (중복 import 문제 해결)
+import * as Y from 'yjs';
 
 export class DocumentManager {
   constructor(options = {}) {
