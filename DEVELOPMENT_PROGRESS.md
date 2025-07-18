@@ -34,16 +34,19 @@ Silent Update 아키텍처를 기반으로 한 BPMN 실시간 협업 시스템 �
 - `test-command-stack.js` ✅
 
 ### 단계 3: 직접 모델 조작 서비스 구현 ✅
+**상태**: 완료 (2025-01-18)
 **목표**: bpmn-js 내부 API를 활용한 직접 모델 조작
-- [x] DirectModelManipulator 클래스 구현
-- [x] ModelTreeManipulator 클래스 구현
+- [x] DirectModelManipulator 클래스 구현 - 저수준 모델 조작
+- [x] ModelTreeManipulator 클래스 구현 - 트리 구조 관리
 - [x] BusinessObject 직접 생성/수정 기능
-- [x] Canvas 직접 조작 기능
+- [x] Canvas 직접 조작 기능 (Registry, Graphics)
+- [x] 요소 간 관계 설정 (부모-자식, 연결)
+- [x] 기본 테스트 파일 구현
 
-**파일**: `src/model-manipulation/`
+**파일**: `src/collaboration/`
 - `DirectModelManipulator.js` ✅
 - `ModelTreeManipulator.js` ✅
-- `index.js` ✅
+- `test-model-manipulation.js` ✅
 
 ### 단계 4: 협업 매니저 및 이벤트 필터링 구현 📋
 **목표**: 무한 루프 방지 및 원격 변경사항 적용 시스템
